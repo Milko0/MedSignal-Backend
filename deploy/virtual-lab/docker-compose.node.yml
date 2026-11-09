@@ -1,0 +1,45 @@
+# UNTESTED TEMPLATE for the UNIPI Virtual Lab: run on EACH of the 3 VMs. Set NODE_IP and VM1_IP in .env.
+#   VM1:  docker compose -f docker-compose.node.yml --profile primary up -d
+#   VM2/3: docker compose -f docker-compose.node.yml --profile replica up -d
+# Every VM runs one mongod (replica set member) and one Redis (primary on VM1, replicas on VM2/VM3) plus a Sentinel.
+services:
+  mongo:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports: ["27017:27017"]
+    volumes: ["mongo-data:/data/db"]
+    restart: unless-stopped
+  redis-primary:
+    profiles: ["primary"]
+    image: redis:7
+    command: redis-server --appendonly yes
+    ports: ["6379:6379"]
+    volumes: ["redis-data:/data"]
+    restart: unless-stopped
+  redis-replica:
+    profiles: ["replica"]
+    image: redis:7
+    command: redis-server --appendonly yes --replicaof ${VM1_IP} 6379 --replica-announce-ip ${NODE_IP} --replica-announce-port 6379
+    ports: ["6379:6379"]
+    volumes: ["redis-data:/data"]
+    restart: unless-stopped
+  sentinel:
+    image: redis:7
+    command:
+      - sh
+      - -c
+      - |
+        cat > /tmp/s.conf <<EOF
+        port 26379
+        sentinel monitor mymaster ${VM1_IP} 6379 2
+        sentinel down-after-milliseconds mymaster 5000
+        sentinel failover-timeout mymaster 10000
+        sentinel announce-ip ${NODE_IP}
+        sentinel announce-port 26379
+        EOF
+        redis-sentinel /tmp/s.conf
+    ports: ["26379:26379"]
+    restart: unless-stopped
+volumes:
+  mongo-data: {}
+  redis-data: {}

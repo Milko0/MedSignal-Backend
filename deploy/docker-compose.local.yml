@@ -1,0 +1,83 @@
+# Local cluster: MongoDB replica set x3, Redis primary + 2 replicas + 3 Sentinels.
+#   docker compose -f deploy/docker-compose.local.yml up -d            -> databases only
+#   docker compose -f deploy/docker-compose.local.yml --profile app up -d --build   -> + api, worker, frontend
+services:
+  mongo1:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports: ["27017:27017"]
+    volumes: ["mongo1-data:/data/db"]
+  mongo2:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports: ["27018:27017"]
+    volumes: ["mongo2-data:/data/db"]
+  mongo3:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports: ["27019:27017"]
+    volumes: ["mongo3-data:/data/db"]
+  mongo-init:
+    image: mongo:7
+    depends_on: [mongo1, mongo2, mongo3]
+    volumes: ["./mongo/init-replica.sh:/init.sh:ro"]
+    entrypoint: ["sh", "/init.sh"]
+    restart: "no"
+
+  redis-primary:
+    image: redis:7
+    command: redis-server --appendonly yes
+    ports: ["6379:6379"]
+    volumes: ["redis-primary-data:/data"]
+  redis-replica-1:
+    image: redis:7
+    command: redis-server --appendonly yes --replicaof redis-primary 6379
+    ports: ["6380:6379"]
+    depends_on: [redis-primary]
+  redis-replica-2:
+    image: redis:7
+    command: redis-server --appendonly yes --replicaof redis-primary 6379
+    ports: ["6381:6379"]
+    depends_on: [redis-primary]
+  sentinel-1: &sentinel
+    image: redis:7
+    volumes: ["./redis/sentinel.conf:/etc/sentinel/sentinel.conf:ro"]
+    command: ["sh", "-c", "cp /etc/sentinel/sentinel.conf /tmp/sentinel.conf && redis-sentinel /tmp/sentinel.conf"]
+    ports: ["26379:26379"]
+    depends_on: [redis-primary]
+  sentinel-2:
+    <<: *sentinel
+    ports: ["26380:26379"]
+  sentinel-3:
+    <<: *sentinel
+    ports: ["26381:26379"]
+
+  api:
+    profiles: ["app"]
+    build: ..
+    environment:
+      MONGO_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0
+      REDIS_SENTINELS: sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
+      JWT_SECRET: change-me-in-real-env-change-me-in-real-env
+      CORS_ORIGINS: http://localhost:8080
+    ports: ["8000:8000"]
+    depends_on: [mongo-init, sentinel-1]
+  worker:
+    profiles: ["app"]
+    build: ..
+    command: ["python", "-m", "app.worker"]
+    environment:
+      MONGO_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0
+      REDIS_SENTINELS: sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
+    depends_on: [mongo-init, sentinel-1]
+  frontend:
+    profiles: ["app"]
+    build: ../../MedSignal-Frontend
+    ports: ["8080:80"]
+    depends_on: [api]
+
+volumes:
+  mongo1-data: {}
+  mongo2-data: {}
+  mongo3-data: {}
+  redis-primary-data: {}
