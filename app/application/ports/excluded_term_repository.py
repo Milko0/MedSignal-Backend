@@ -1,18 +1,18 @@
-"""Port: Non-specific reaction terms (FR-26)."""
-from __future__ import annotations
-
+"""Port: non-specific reaction terms excluded from signals and label gaps (FR-26)."""
 from abc import ABC, abstractmethod
-from datetime import datetime  # noqa: F401
-from typing import AsyncIterator  # noqa: F401
+
+from app.domain.entities.excluded_term import ExcludedTerm
 
 
 class ExcludedTermRepository(ABC):
     @abstractmethod
-    async def list(self) -> list[str]: ...
+    async def list(self) -> list[ExcludedTerm]: ...
 
     @abstractmethod
-    async def add(self, term: str) -> None: ...
+    async def add(self, term: ExcludedTerm) -> None: ...
 
     @abstractmethod
-    async def remove(self, term: str) -> None: ...
+    async def remove(self, term: str) -> bool: ...
 
+    async def as_set(self) -> set[str]:
+        return {t.term for t in await self.list()}

@@ -1,19 +1,11 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends
+
+from app.application.container import Container
+from app.presentation.api.dependencies import container
 
 router = APIRouter(tags=["Health"])
 
 
-@router.get("/health", summary="Liveness and database reachability")
-async def health(request: Request):
-    out = {"api": "ok", "mongo": "unknown", "redis": "unknown"}
-    try:
-        await request.app.state.mongo.admin.command("ping")
-        out["mongo"] = "ok"
-    except Exception as e:  # noqa: BLE001
-        out["mongo"] = f"down ({type(e).__name__})"
-    try:
-        await request.app.state.redis.ping()
-        out["redis"] = "ok"
-    except Exception as e:  # noqa: BLE001
-        out["redis"] = f"down ({type(e).__name__})"
-    return out
+@router.get("/health")
+async def health(c: Container = Depends(container)) -> dict:
+    return {"status": "ok", "ingredients": await c.ingredients.count(), "reports": await c.reports.count()}

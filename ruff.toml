@@ -1,0 +1,13 @@
+# Ruff config for the repo (without one, newer ruff versions apply a broader default rule set).
+target-version = "py312"
+line-length = 120
+extend-exclude = ["data", ".venv"]
+
+[lint]
+# B008: FastAPI's `Depends(...)` / `Query(...)` in defaults is the framework idiom, not a bug.
+# UP046: keep `Generic[T]` on Pydantic generic models (explicit and works with every Pydantic 2.x).
+ignore = ["B008", "UP046"]
+
+[lint.per-file-ignores]
+"tests/e2e/README_placeholder.py" = ["N999"]
+"scripts/*" = ["ASYNC230"]   # one-off CLI scripts may write files synchronously

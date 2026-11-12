@@ -1,13 +1,20 @@
-"""Domain entity: Alert."""
-from dataclasses import dataclass
+from datetime import datetime
+
+from pydantic import BaseModel
+
+from app.domain.entities.enums import AlertType
 
 
-@dataclass
-class Alert:
-    id: str
+class Alert(BaseModel):
+    """Notification kept 30 days. ref_type and ref_id say what it is about (signal, label, shortage, recall)."""
+
+    alert_id: str  # deterministic: type + ingredient + event id, so replays cannot duplicate it
     user_id: str
-    type: str  # signal | label | shortage | recall
-    rxcui: str
-    title: str
-    detail: str
-    created_at: str
+    type: AlertType
+    drug_rxcui: str
+    message: str
+    ref_type: str | None = None
+    ref_id: str | None = None
+    created_at: datetime
+    expires_at: datetime | None = None
+    dismissed: bool = False

@@ -1,84 +1,80 @@
-from datetime import date
-from typing import Literal
-
-from pydantic import BaseModel
-
-from app.application.dtos.common import Meta
+from pydantic import BaseModel, Field
 
 
-class DrugSearchItem(BaseModel):
+class DrugSearchResult(BaseModel):
     rxcui: str
     name: str
-    kind: Literal["generic", "brand"] = "generic"
-    drug_class: str | None = None
-    dosage_form: str | None = None
+    brand_names: list[str] = Field(default_factory=list)
+    matched: str
+    score: float
 
 
-class ShortageStatus(BaseModel):
-    status: Literal["Current", "To Be Discontinued", "Resolved", "None"] = "None"
-    since: date | None = None
-    expected_return: str | None = None
+class ShortageInfo(BaseModel):
+    status: str | None = None             # CURRENT | TO_BE_DISCONTINUED | RESOLVED | None (no record)
+    packages_in_shortage: int = 0
+    packages_total: int = 0
+    dosage_forms: list[str] = Field(default_factory=list)   # all forms with a record, for the form filter
+    since: str | None = None
+    reasons: list[str] = Field(default_factory=list)
 
 
-class RecallCounts(BaseModel):
+class RecallsInfo(BaseModel):
     class_i: int = 0
     class_ii: int = 0
     class_iii: int = 0
+    not_classified: int = 0
+    total: int = 0
+    linked_share: float = 0.0   # share of ALL recalls that are linked to a drug: the counts are a lower bound
 
 
 class LabelSummary(BaseModel):
-    set_id: str | None = None
-    effective_date: date | None = None
+    available: bool = False
+    product_types: list[str] = Field(default_factory=list)
+    effective_date: str | None = None
     has_boxed_warning: bool = False
+    description: str | None = None
 
 
 class ReactionCount(BaseModel):
-    term: str
-    count: int
-
-
-class TopSignal(BaseModel):
     reaction: str
     reports: int
-    prr: float
-    ci_lower: float
-    in_label: bool | None = None
-    novelty: Literal["known", "literature", "novel"] | None = None
+
+
+class TrendPoint(BaseModel):
+    month: str  # YYYY-MM
+    reaction: str
+    reports: int
+
+
+class AtcClass(BaseModel):
+    class_id: str
+    name: str
 
 
 class Drug360Response(BaseModel):
-    meta: Meta = Meta()
     rxcui: str
     name: str
-    description: str | None = None
-    drug_class: str | None = None
-    dosage_form: str | None = None
-    shortage: ShortageStatus = ShortageStatus()
-    recalls: RecallCounts = RecallCounts()
-    label: LabelSummary = LabelSummary()
-    top_reactions: list[ReactionCount] = []
-    top_signals: list[TopSignal] = []
+    brand_names: list[str] = Field(default_factory=list)
+    atc_classes: list[AtcClass] = Field(default_factory=list)
+    selected_dosage_form: str | None = None
+    selected_route: str | None = None
+    shortage: ShortageInfo
+    recalls: RecallsInfo
+    label: LabelSummary
+    top_reactions: list[ReactionCount]
     is_followed: bool = False
+    match_coverage: float = 0.0   # share of reports whose drugs were resolved to an ingredient
 
 
-class TrendSeries(BaseModel):
-    reaction: str
-    months: list[str]
-    counts: list[int]
-
-
-class ReactionTrendResponse(BaseModel):
-    meta: Meta = Meta()
-    series: list[TrendSeries]
-
-
-class LabelGapItem(BaseModel):
+class LabelGapRow(BaseModel):
     reaction: str
     reports: int
-    match: Literal["full", "partial", "gap"]
+    match_level: str      # PARTIAL or NONE
+    in_indications: bool = False
 
 
-class LabelGapResponse(BaseModel):
-    meta: Meta = Meta()
-    rxcui: str
-    items: list[LabelGapItem]
+class LabelGapsData(BaseModel):
+    label_available: bool
+    comparable: bool = True      # False when only OTC labels exist (they have no adverse reaction section)
+    note: str | None = None
+    gaps: list[LabelGapRow] = Field(default_factory=list)

@@ -1,30 +1,30 @@
-"""Generates the five CRUD routes for an admin resource (FR-22 to FR-25). Bodies are plain dicts in the skeleton."""
-from fastapi import APIRouter
+"""Builds the four CRUD routers of the admin area. Bodies are filled per resource as the repositories grow."""
+from fastapi import APIRouter, status
 
 from app.presentation.api.responses import not_implemented
 
 
-def crud_router(resource: str, fr: str) -> APIRouter:
-    router = APIRouter(prefix=f"/{resource}", tags=[f"Admin - {resource}"])
+def make_crud_router(name: str, fr: str) -> APIRouter:
+    router = APIRouter(prefix=f"/{name}", tags=[f"Admin: {name}"])
 
-    @router.get("", summary=f"List {resource} ({fr})")
-    async def list_items(page: int = 1, page_size: int = 20):
-        not_implemented(f"list {resource}")
+    @router.get("", summary=f"List {name} ({fr})")
+    async def list_items(skip: int = 0, limit: int = 50):
+        not_implemented()
 
-    @router.post("", status_code=201, summary=f"Create ({fr})")
+    @router.post("", status_code=status.HTTP_201_CREATED, summary=f"Create ({fr})")
     async def create_item(body: dict):
-        not_implemented(f"create {resource}")
+        not_implemented()
 
     @router.get("/{item_id}", summary=f"Read ({fr})")
     async def read_item(item_id: str):
-        not_implemented(f"read {resource}")
+        not_implemented()
 
     @router.put("/{item_id}", summary=f"Update ({fr})")
     async def update_item(item_id: str, body: dict):
-        not_implemented(f"update {resource}")
+        not_implemented()
 
-    @router.delete("/{item_id}", status_code=204, summary=f"Delete ({fr})")
+    @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT, summary=f"Delete ({fr})")
     async def delete_item(item_id: str):
-        not_implemented(f"delete {resource}")
+        not_implemented()
 
     return router

@@ -1,37 +1,44 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 
-from app.application.dtos.cabinet import AlertListResponse, CabinetResponse, FollowRequest
-from app.presentation.api.dependencies import get_current_user
-from app.presentation.api.responses import not_implemented
+from app.application.dtos.cabinet import AlertItem, FollowedDrug, FollowRequest
+from app.presentation.api.dependencies import (
+    CurrentUser,
+    dismiss_alert,
+    follow_drug,
+    get_current_user,
+    list_alerts,
+    list_followed,
+    unfollow_drug,
+)
 
-router = APIRouter(prefix="/cabinet", tags=["My medicines"], dependencies=[Depends(get_current_user)])
-
-
-@router.get("", response_model=CabinetResponse, summary="Followed drugs with status (FR-16)")
-async def list_followed():
-    not_implemented("ListFollowed")
-
-
-@router.post("/follows", status_code=204, summary="Follow a drug (FR-15)")
-async def follow(body: FollowRequest):
-    not_implemented("FollowDrug")
+router = APIRouter(prefix="/cabinet", tags=["My medicines"])
 
 
-@router.delete("/follows/{rxcui}", status_code=204, summary="Unfollow a drug (FR-15)")
-async def unfollow(rxcui: str):
-    not_implemented("UnfollowDrug")
+@router.get("", response_model=list[FollowedDrug], summary="Medicine cabinet (FR-16)")
+async def cabinet(user: CurrentUser = Depends(get_current_user), uc=Depends(list_followed)):
+    return await uc.execute(user.user_id)
 
 
-@router.get("/alerts", response_model=AlertListResponse, summary="Alerts, 30-day expiry (FR-18)")
-async def list_alerts():
-    not_implemented("ListAlerts")
+@router.post("/follows", status_code=status.HTTP_204_NO_CONTENT, summary="Follow a drug (FR-15)")
+async def follow(body: FollowRequest, user: CurrentUser = Depends(get_current_user), uc=Depends(follow_drug)):
+    await uc.execute(user.user_id, body.rxcui)
 
 
-@router.delete("/alerts/{alert_id}", status_code=204, summary="Dismiss one alert (FR-18)")
-async def dismiss_alert(alert_id: str):
-    not_implemented("DismissAlert")
+@router.delete("/follows/{rxcui}", status_code=status.HTTP_204_NO_CONTENT, summary="Unfollow a drug (FR-15)")
+async def unfollow(rxcui: str, user: CurrentUser = Depends(get_current_user), uc=Depends(unfollow_drug)):
+    await uc.execute(user.user_id, rxcui)
 
 
-@router.delete("/alerts", status_code=204, summary="Dismiss all alerts (FR-18)")
-async def dismiss_all():
-    not_implemented("DismissAllAlerts")
+@router.get("/alerts", response_model=list[AlertItem], summary="List alerts (FR-17)")
+async def alerts(user: CurrentUser = Depends(get_current_user), uc=Depends(list_alerts)):
+    return await uc.execute(user.user_id)
+
+
+@router.delete("/alerts/{alert_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Dismiss an alert (FR-18)")
+async def dismiss_one(alert_id: str, user: CurrentUser = Depends(get_current_user), uc=Depends(dismiss_alert)):
+    await uc.execute(user.user_id, alert_id)
+
+
+@router.delete("/alerts", status_code=status.HTTP_204_NO_CONTENT, summary="Dismiss all alerts (FR-18)")
+async def dismiss_all(user: CurrentUser = Depends(get_current_user), uc=Depends(dismiss_alert)):
+    await uc.execute(user.user_id, None)

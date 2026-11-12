@@ -1,21 +1,19 @@
-"""Port: Redis alert hashes with 30-day TTL plus a sorted-set index."""
-from __future__ import annotations
-
+"""Port: key-value: alerts with a 30-day TTL."""
 from abc import ABC, abstractmethod
-from datetime import datetime  # noqa: F401
-from typing import AsyncIterator  # noqa: F401
+
+from app.domain.entities.alert import Alert
 
 
 class AlertStore(ABC):
     @abstractmethod
-    async def add(self, user_id: str, event_id: str, payload: dict) -> None: ...
+    async def add(self, alert: Alert, ttl_seconds: int) -> bool:
+        """Creates the alert only if its id does not exist (idempotent). Returns True if created."""
 
     @abstractmethod
-    async def list(self, user_id: str) -> list[dict]: ...
+    async def list(self, user_id: str, limit: int = 50) -> list[Alert]: ...
 
     @abstractmethod
-    async def dismiss(self, user_id: str, event_id: str) -> None: ...
+    async def dismiss(self, user_id: str, alert_id: str) -> bool: ...
 
     @abstractmethod
-    async def dismiss_all(self, user_id: str) -> None: ...
-
+    async def dismiss_all(self, user_id: str) -> int: ...

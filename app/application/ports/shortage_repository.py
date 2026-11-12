@@ -1,19 +1,22 @@
-"""Port: Shortage history (source of truth for shortage:{rxcui})."""
+"""Port: shortage list: current state per package plus our own event history."""
 from abc import ABC, abstractmethod
-from datetime import datetime  # noqa: F401
-from typing import AsyncIterator  # noqa: F401
+
+from app.domain.entities.shortage import ShortageEvent, ShortageRecord
 
 
 class ShortageRepository(ABC):
     @abstractmethod
-    async def append_status_change(self, record: dict) -> None: ...
+    async def current_by_package(self) -> dict[str, ShortageRecord]: ...
 
     @abstractmethod
-    async def latest_status(self, rxcui: str) -> dict | None: ...
+    async def replace_current(self, records: list[ShortageRecord]) -> int:
+        """Stores the new current set (records that left the list are removed)."""
 
     @abstractmethod
-    async def history(self, rxcui: str) -> list[dict]: ...
+    async def add_events(self, events: list[ShortageEvent]) -> int: ...
 
     @abstractmethod
-    async def current_counts(self, rxcuis: list[str]) -> dict[str, int]: ...
+    async def find_by_ingredient(self, ingredient_rxcui: str) -> list[ShortageRecord]: ...
 
+    @abstractmethod
+    async def events_for_ingredient(self, ingredient_rxcui: str, limit: int = 100) -> list[ShortageEvent]: ...

@@ -1,8 +1,11 @@
-"""Shared constants. NFR-11: the disclaimer text lives here once."""
+"""Shared constants: disclaimer (NFR-11), alert retention (NFR-09), URL prefix."""
+
+API_PREFIX = "/api/v1"
 
 DISCLAIMER = (
-    "Adverse event reports are voluntary and unverified. They do not prove that a drug caused a reaction. "
-    "MedSignal is an academic project and not a medical tool."
+    "Adverse event reports are voluntary and unverified. "
+    "They show a statistical signal, not proof that a drug caused a reaction."
 )
-ALERT_TTL_SECONDS = 30 * 24 * 3600  # NFR-09 / FR-18
-SHORTAGE_CACHE_TTL_SECONDS = 15 * 60
+
+ALERT_TTL_DAYS = 30
+ALERT_TTL_SECONDS = ALERT_TTL_DAYS * 24 * 3600

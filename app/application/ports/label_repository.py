@@ -1,19 +1,19 @@
-"""Port: Drug labels and versions."""
+"""Port: DailyMed / openFDA labels (one document per set id)."""
 from abc import ABC, abstractmethod
-from datetime import datetime  # noqa: F401
-from typing import AsyncIterator  # noqa: F401
+
+from app.domain.entities.enums import ProductType
+from app.domain.entities.label import DrugLabel
 
 
 class LabelRepository(ABC):
     @abstractmethod
-    async def upsert(self, label: dict) -> None: ...
+    async def upsert_many(self, labels: list[DrugLabel]) -> int: ...
 
     @abstractmethod
-    async def summary_for_drug(self, rxcui: str) -> dict | None: ...
+    async def get(self, set_id: str) -> DrugLabel | None: ...
 
     @abstractmethod
-    async def adverse_text_for_drug(self, rxcui: str) -> str: ...
+    async def find_by_ingredient(self, ingredient_rxcui: str, product_type: ProductType | None = None) -> list[DrugLabel]: ...
 
     @abstractmethod
-    async def history(self, set_id: str) -> list[dict]: ...
-
+    async def count(self) -> int: ...

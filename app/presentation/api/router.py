@@ -1,6 +1,15 @@
 from fastapi import APIRouter
 
-from app.presentation.api.routers import auth, cabinet, drugs, health, profile, shortages, signals, statistics
+from app.presentation.api.routers import (
+    auth,
+    cabinet,
+    drugs,
+    health,
+    profile,
+    shortages,
+    signals,
+    statistics,
+)
 from app.presentation.api.routers.admin import router as admin_router
 
 api_router = APIRouter()

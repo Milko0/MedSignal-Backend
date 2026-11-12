@@ -2,7 +2,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class ProfileUpdate(BaseModel):
-    username: str | None = Field(default=None, min_length=3, max_length=40)
+    username: str | None = Field(default=None, min_length=3, max_length=32)
     email: EmailStr | None = None
 
 
@@ -11,9 +11,9 @@ class PasswordChange(BaseModel):
     new_password: str = Field(min_length=8)
 
 
-class AlertSettings(BaseModel):
+class AlertSettingsDto(BaseModel):
     new_signal: bool = True
     label_updated: bool = True
-    shortage_changes: bool = True
-    new_recall: bool = False
+    shortage_changed: bool = True
+    new_recall: bool = True
     min_reports: int = 20

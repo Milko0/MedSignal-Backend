@@ -1,25 +1,26 @@
-"""Domain exceptions. Mapped to HTTP codes in presentation/api/error_handlers.py."""
-
-
 class MedSignalError(Exception):
-    """Base class."""
+    """Base class of domain errors. The presentation layer maps them to HTTP codes."""
 
 
 class NotFoundError(MedSignalError):
     pass
 
 
-class ConflictError(MedSignalError):
+class AlreadyExistsError(MedSignalError):
     pass
 
 
-class ValidationFailedError(MedSignalError):
-    pass
-
-
-class AuthenticationError(MedSignalError):
+class InvalidCredentialsError(MedSignalError):
     pass
 
 
 class PermissionDeniedError(MedSignalError):
     pass
+
+
+class ValidationRuleError(MedSignalError):
+    pass
+
+
+class TransformError(MedSignalError):
+    """A raw source record cannot be turned into a clean model (the record is skipped and counted)."""

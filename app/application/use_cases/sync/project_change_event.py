@@ -1,15 +1,9 @@
-"""Mongo change event -> recompute and overwrite Redis keys, create alerts. (FR-30)."""
+"""Event sync (teammates, phase 5): apply one MongoDB change event to Redis idempotently.
+
+Contract: overwrite values from MongoDB (never increment), deterministic alert ids, resume token in sync_checkpoints.
+"""
 
 
 class ProjectChangeEvent:
-    """Mongo change event -> recompute and overwrite Redis keys, create alerts.
-
-    Requirements: FR-30
-    Depends only on ports (application/ports) and the domain layer.
-    """
-
-    def __init__(self, **ports):  # TODO: replace with explicit port arguments
-        self.ports = ports
-
-    async def execute(self, *args, **kwargs):
-        raise NotImplementedError("ProjectChangeEvent")
+    async def execute(self, event: dict) -> None:
+        raise NotImplementedError("Written with the MongoDB change-stream adapter")

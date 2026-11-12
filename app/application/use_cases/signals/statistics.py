@@ -1,15 +1,14 @@
-"""Age group, sex, country, seriousness over time. (FR-08)."""
+"""FR-08: reports by age group, sex, country, seriousness and quarter."""
+from app.application.dtos.signals import StatBucket, Statistics
+from app.application.ports.report_repository import ReportRepository
+
+GROUPS = ("age_group", "sex", "country", "seriousness", "report_type", "quarter")
 
 
-class Statistics:
-    """Age group, sex, country, seriousness over time.
+class GetStatistics:
+    def __init__(self, reports: ReportRepository) -> None:
+        self.reports = reports
 
-    Requirements: FR-08
-    Depends only on ports (application/ports) and the domain layer.
-    """
-
-    def __init__(self, **ports):  # TODO: replace with explicit port arguments
-        self.ports = ports
-
-    async def execute(self, *args, **kwargs):
-        raise NotImplementedError("Statistics")
+    async def execute(self, group_by: str, rxcui: str | None = None, quarter: str | None = None) -> Statistics:
+        rows = await self.reports.statistics(group_by, rxcui, quarter)
+        return Statistics(group_by=group_by, buckets=[StatBucket(group=g, value=v) for g, v in rows])

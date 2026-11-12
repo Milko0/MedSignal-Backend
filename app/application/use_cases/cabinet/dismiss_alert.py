@@ -1,15 +1,15 @@
-"""Dismiss one or all alerts. (FR-18)."""
+"""FR-18: dismiss one alert or all of them."""
+from app.application.ports.alert_store import AlertStore
+from app.domain.exceptions import NotFoundError
 
 
 class DismissAlert:
-    """Dismiss one or all alerts.
+    def __init__(self, alerts: AlertStore) -> None:
+        self.alerts = alerts
 
-    Requirements: FR-18
-    Depends only on ports (application/ports) and the domain layer.
-    """
-
-    def __init__(self, **ports):  # TODO: replace with explicit port arguments
-        self.ports = ports
-
-    async def execute(self, *args, **kwargs):
-        raise NotImplementedError("DismissAlert")
+    async def execute(self, user_id: str, alert_id: str | None = None) -> int:
+        if alert_id is None:
+            return await self.alerts.dismiss_all(user_id)
+        if not await self.alerts.dismiss(user_id, alert_id):
+            raise NotFoundError("Alert not found")
+        return 1

@@ -1,10 +1,8 @@
-"""Port: Time source (mockable)."""
+"""Port: time source (testable)."""
 from abc import ABC, abstractmethod
-from datetime import datetime  # noqa: F401
-from typing import AsyncIterator  # noqa: F401
+from datetime import datetime
 
 
 class Clock(ABC):
     @abstractmethod
-    async def now(self) -> datetime: ...
-
+    def now(self) -> datetime: ...

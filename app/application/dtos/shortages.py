@@ -1,27 +1,19 @@
-from typing import Literal
-
-from pydantic import BaseModel
-
-from app.application.dtos.common import Meta
+from pydantic import BaseModel, Field
 
 
-class AlternativeItem(BaseModel):
+class AlternativeRow(BaseModel):
+    match_type: str       # SAME_INGREDIENT | SAME_CLASS
     rxcui: str
-    product: str
-    match: str  # "Same active ingredient" | "Same class (penicillins)"
-    dosage_form: str
-    recalls: int
-    signal_profile: Literal["low", "moderate", "high"]
-    status: Literal["available", "in_shortage"] = "available"
+    name: str
+    dosage_form: str | None = None
+    routes: list[str] = Field(default_factory=list)
+    recalls: int = 0
+    signal_profile: str   # LOW | MODERATE | HIGH
+    products_available: int = 0
+    rank: int = 0
 
 
-class RippleInfo(BaseModel):
-    same_class_total: int = 0
-    same_class_in_shortage: int = 0
-
-
-class AlternativesResponse(BaseModel):
-    meta: Meta = Meta()
-    rxcui: str
-    ripple: RippleInfo = RippleInfo()
-    alternatives: list[AlternativeItem]
+class AlternativesData(BaseModel):
+    target_dosage_form: str | None = None
+    target_routes: list[str] = Field(default_factory=list)
+    items: list[AlternativeRow]

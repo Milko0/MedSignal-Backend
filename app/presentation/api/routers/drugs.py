@@ -1,30 +1,40 @@
 from fastapi import APIRouter, Depends, Query
 
-from app.application.dtos.drugs import (Drug360Response, DrugSearchItem, LabelGapResponse, ReactionTrendResponse)
-from app.application.use_cases.drugs.get_drug_360 import GetDrug360
-from app.presentation.api.dependencies import get_drug_360_use_case, get_optional_user
-from app.presentation.api.responses import not_implemented
+from app.application.dtos.common import DisclaimedResponse, disclaimed
+from app.application.dtos.drugs import (
+    Drug360Response,
+    DrugSearchResult,
+    LabelGapsData,
+    TrendPoint,
+)
+from app.presentation.api.dependencies import (
+    CurrentUser,
+    get_current_user_optional,
+    get_drug_360,
+    get_label_gaps,
+    get_reaction_trend,
+    search_drug,
+)
 
 router = APIRouter(prefix="/drugs", tags=["Drugs"])
 
 
-@router.get("", response_model=list[DrugSearchItem], summary="Search by generic, brand or misspelled name (FR-01)")
-async def search_drugs(query: str = Query(min_length=2, examples=["ibuprofn"])):
-    not_implemented("SearchDrug")
+@router.get("", response_model=list[DrugSearchResult], summary="Search a drug, typo tolerant (FR-01)")
+async def search(query: str = Query(min_length=2), limit: int = Query(10, ge=1, le=50), uc=Depends(search_drug)):
+    return await uc.execute(query, limit)
 
 
-@router.get("/{rxcui}/overview", response_model=Drug360Response, summary="Drug 360 card (FR-02)")
-async def drug_overview(rxcui: str, user: dict | None = Depends(get_optional_user),
-                        uc: GetDrug360 = Depends(get_drug_360_use_case)):
-    # return await uc.execute(rxcui, user["sub"] if user else None)   # enable once Mongo repositories exist
-    not_implemented("GetDrug360")
+@router.get("/{rxcui}/overview", response_model=Drug360Response, summary="Drug 360 page (FR-02)")
+async def overview(rxcui: str, dosage_form: str | None = None, route: str | None = None,
+                   user: CurrentUser | None = Depends(get_current_user_optional), uc=Depends(get_drug_360)):
+    return await uc.execute(rxcui, user.user_id if user else None, dosage_form, route)
 
 
-@router.get("/{rxcui}/reaction-trend", response_model=ReactionTrendResponse, summary="Monthly trend of top reactions (FR-03)")
-async def reaction_trend(rxcui: str):
-    not_implemented("GetReactionTrend")
+@router.get("/{rxcui}/reaction-trend", response_model=list[TrendPoint], summary="Monthly trend of top reactions (FR-03)")
+async def reaction_trend(rxcui: str, months: int = Query(12, ge=3, le=36), uc=Depends(get_reaction_trend)):
+    return await uc.execute(rxcui, months)
 
 
-@router.get("/{rxcui}/label-gaps", response_model=LabelGapResponse, summary="Label-gap candidates (FR-07)")
-async def label_gaps(rxcui: str):
-    not_implemented("GetLabelGaps")
+@router.get("/{rxcui}/label-gaps", response_model=DisclaimedResponse[LabelGapsData], summary="Label-gap candidates (FR-07)")
+async def label_gaps(rxcui: str, min_reports: int = Query(20, ge=1), uc=Depends(get_label_gaps)):
+    return disclaimed(await uc.execute(rxcui, min_reports))

@@ -1,18 +1,15 @@
-"""Port: Ingestion logs (FR-21)."""
-from __future__ import annotations
-
+"""Port: logs of ingestion runs (FR-21)."""
 from abc import ABC, abstractmethod
-from datetime import datetime  # noqa: F401
-from typing import AsyncIterator  # noqa: F401
+
+from app.domain.entities.ingestion_run import IngestionRun
 
 
 class IngestionRunRepository(ABC):
     @abstractmethod
-    async def start(self, kind: str) -> str: ...
+    async def add(self, run: IngestionRun) -> None: ...
 
     @abstractmethod
-    async def finish(self, run_id: str, records: int, errors: list[str]) -> None: ...
+    async def update(self, run: IngestionRun) -> None: ...
 
     @abstractmethod
-    async def list(self, limit: int = 50) -> list[dict]: ...
-
+    async def list(self, skip: int = 0, limit: int = 50) -> list[IngestionRun]: ...

@@ -1,15 +1,10 @@
-"""Unfollow a drug. (FR-15)."""
+"""FR-15: unfollow an ingredient."""
+from app.application.ports.follow_store import FollowStore
 
 
 class UnfollowDrug:
-    """Unfollow a drug.
+    def __init__(self, follows: FollowStore) -> None:
+        self.follows = follows
 
-    Requirements: FR-15
-    Depends only on ports (application/ports) and the domain layer.
-    """
-
-    def __init__(self, **ports):  # TODO: replace with explicit port arguments
-        self.ports = ports
-
-    async def execute(self, *args, **kwargs):
-        raise NotImplementedError("UnfollowDrug")
+    async def execute(self, user_id: str, rxcui: str) -> None:
+        await self.follows.unfollow(user_id, rxcui)

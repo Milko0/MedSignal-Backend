@@ -1,21 +1,26 @@
-"""Port: Precomputed quarterly signals."""
-from __future__ import annotations
-
+"""Port: precomputed quarterly signals."""
 from abc import ABC, abstractmethod
-from datetime import datetime  # noqa: F401
-from typing import AsyncIterator  # noqa: F401
+
+from app.domain.entities.signal import SafetySignal
 
 
 class SignalRepository(ABC):
     @abstractmethod
-    async def upsert_many(self, signals: list[dict]) -> int: ...
+    async def upsert_many(self, signals: list[SafetySignal]) -> int: ...
 
     @abstractmethod
-    async def list(self, filters: dict, page: int, page_size: int) -> tuple[list[dict], int]: ...
+    async def search(self, quarter: str, ingredient_rxcui: str | None, reaction: str | None, min_reports: int,
+                     only_signals: bool, only_emerging: bool, skip: int, limit: int) -> tuple[list[SafetySignal], int]: ...
 
     @abstractmethod
-    async def top_for_drug(self, rxcui: str, limit: int = 5) -> list[dict]: ...
+    async def previous_prrs(self, ingredient_rxcui: str, reaction: str, quarter: str, n: int = 4) -> list[float]: ...
 
     @abstractmethod
-    async def emerging(self, quarter: str, limit: int = 20) -> list[dict]: ...
+    async def trend(self, ingredient_rxcui: str, reaction: str, n: int = 6) -> list[float]: ...
 
+    @abstractmethod
+    async def signal_count(self, ingredient_rxcui: str, quarter: str) -> int:
+        """Pairs that meet the Evans criteria for the ingredient in the quarter."""
+
+    @abstractmethod
+    async def latest_quarter(self) -> str | None: ...

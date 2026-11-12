@@ -1,15 +1,13 @@
-"""Typo-tolerant search, normalised to RxCUI. (FR-01)."""
+"""FR-01: typo tolerant search normalised to an ingredient rxcui."""
+from app.application.dtos.drugs import DrugSearchResult
+from app.application.ports.ingredient_repository import IngredientRepository
 
 
 class SearchDrug:
-    """Typo-tolerant search, normalised to RxCUI.
+    def __init__(self, ingredients: IngredientRepository) -> None:
+        self.ingredients = ingredients
 
-    Requirements: FR-01
-    Depends only on ports (application/ports) and the domain layer.
-    """
-
-    def __init__(self, **ports):  # TODO: replace with explicit port arguments
-        self.ports = ports
-
-    async def execute(self, *args, **kwargs):
-        raise NotImplementedError("SearchDrug")
+    async def execute(self, query: str, limit: int = 10) -> list[DrugSearchResult]:
+        found = await self.ingredients.search(query, limit)
+        return [DrugSearchResult(rxcui=d.rxcui, name=d.name, brand_names=d.brand_names[:5], matched=m, score=round(s, 3))
+                for d, m, s in found]

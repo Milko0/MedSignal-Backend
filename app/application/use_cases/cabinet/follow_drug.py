@@ -1,15 +1,14 @@
-"""Follow a drug. (FR-15)."""
+"""FR-15: follow an ingredient."""
+from app.application.ports.follow_store import FollowStore
+from app.application.ports.ingredient_repository import IngredientRepository
+from app.domain.exceptions import NotFoundError
 
 
 class FollowDrug:
-    """Follow a drug.
+    def __init__(self, follows: FollowStore, ingredients: IngredientRepository) -> None:
+        self.follows, self.ingredients = follows, ingredients
 
-    Requirements: FR-15
-    Depends only on ports (application/ports) and the domain layer.
-    """
-
-    def __init__(self, **ports):  # TODO: replace with explicit port arguments
-        self.ports = ports
-
-    async def execute(self, *args, **kwargs):
-        raise NotImplementedError("FollowDrug")
+    async def execute(self, user_id: str, rxcui: str) -> None:
+        if await self.ingredients.get(rxcui) is None:
+            raise NotFoundError(f"Unknown ingredient {rxcui}")
+        await self.follows.follow(user_id, rxcui)

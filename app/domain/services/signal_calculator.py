@@ -1,28 +1,32 @@
-"""PRR, 95% CI lower bound and chi-square. Pure functions, no I/O (unit-testable).
-
-Screening rule (Evans): PRR >= 2, chi-square >= 4 and at least 3 reports.
-Validation case from the data tests: a=551 b=42319 c=9543 d=3609701
--> PRR 4.87, CI lower 4.48, chi-square ~1609.
-"""
+"""Disproportionality statistics for a 2x2 table (pure functions, no I/O)."""
 import math
 from dataclasses import dataclass
 
 from app.domain.value_objects.contingency_table import ContingencyTable
 
+Z_95 = 1.96
+
 
 @dataclass(frozen=True)
-class SignalScore:
+class SignalMetrics:
     prr: float
     ci_lower: float
+    ci_upper: float
     chi_square: float
-    is_signal: bool
 
 
-def compute_signal(t: ContingencyTable, min_reports: int = 3) -> SignalScore | None:
-    if t.a == 0 or t.c == 0:
+def compute_signal(t: ContingencyTable) -> SignalMetrics | None:
+    """PRR = [a/(a+b)] / [c/(c+d)], 95% CI on ln(PRR), and the 2x2 chi-square (no continuity correction).
+
+    Returns None when undefined (a == 0, c == 0 or an empty margin).
+    """
+    a, b, c, d = t.a, t.b, t.c, t.d
+    if a == 0 or c == 0 or (a + b) == 0 or (c + d) == 0:
         return None
-    prr = (t.a / (t.a + t.b)) / (t.c / (t.c + t.d))
-    se = math.sqrt(1 / t.a - 1 / (t.a + t.b) + 1 / t.c - 1 / (t.c + t.d))
-    ci_lower = math.exp(math.log(prr) - 1.96 * se)
-    chi = t.n * (t.a * t.d - t.b * t.c) ** 2 / ((t.a + t.b) * (t.c + t.d) * (t.a + t.c) * (t.b + t.d))
-    return SignalScore(prr, ci_lower, chi, prr >= 2 and chi >= 4 and t.a >= min_reports)
+    prr = (a / (a + b)) / (c / (c + d))
+    se = math.sqrt(1 / a - 1 / (a + b) + 1 / c - 1 / (c + d))
+    ln_prr = math.log(prr)
+    n = t.total
+    denom = (a + b) * (c + d) * (a + c) * (b + d)
+    chi_square = n * (a * d - b * c) ** 2 / denom if denom else 0.0
+    return SignalMetrics(prr, math.exp(ln_prr - Z_95 * se), math.exp(ln_prr + Z_95 * se), chi_square)

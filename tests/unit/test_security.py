@@ -1,4 +1,7 @@
+from app.core.config import Settings
 from app.core.security import create_access_token, decode_access_token, hash_password, verify_password
+
+SETTINGS = Settings(jwt_secret="test-secret-at-least-32-characters-long")
 
 
 def test_password_roundtrip():
@@ -7,4 +10,5 @@ def test_password_roundtrip():
 
 
 def test_token_roundtrip():
-    assert decode_access_token(create_access_token("u1", "user"))["sub"] == "u1"
+    claims = decode_access_token(SETTINGS, create_access_token(SETTINGS, "u1", "user"))
+    assert claims["sub"] == "u1" and claims["role"] == "user"

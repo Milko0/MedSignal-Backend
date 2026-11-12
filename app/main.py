@@ -1,40 +1,43 @@
-"""Application factory (composition root of the API process)."""
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
-from app.infrastructure.mongodb.client import create_mongo_client
-from app.infrastructure.redis.client import create_redis_client
+from app.core.constants import API_PREFIX, DISCLAIMER
+from app.infrastructure.container_factory import build_container
 from app.presentation.api.error_handlers import register_error_handlers
 from app.presentation.api.router import api_router
 
-DESCRIPTION = """
-MedSignal cross-analyses FAERS adverse event reports, DailyMed labels, openFDA shortages and RxNorm names.
+log = logging.getLogger("medsignal")
 
-**Reports are voluntary and unverified; they show a statistical signal, not proof of causation.**
-Every signal and label-gap response carries `meta.disclaimer` (NFR-11).
-"""
+TAGS = [
+    {"name": "Auth", "description": "Register and log in"},
+    {"name": "Drugs", "description": "Search, Drug 360, trend, label gaps"},
+    {"name": "Signals", "description": "PRR signals, emerging signals, reports behind a signal"},
+    {"name": "Statistics", "description": "Report statistics"},
+    {"name": "Shortages", "description": "Alternatives for drugs in shortage"},
+    {"name": "My medicines", "description": "Followed drugs and alerts"},
+    {"name": "Profile", "description": "Profile and alert settings"},
+]
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    app.state.settings = settings
-    app.state.mongo = create_mongo_client(settings)  # lazy: connects on first use
-    app.state.redis = create_redis_client(settings)
+    app.state.container = await build_container(settings)
+    log.info("Storage backend: %s", settings.storage_backend)
     yield
-    app.state.mongo.close()
-    await app.state.redis.aclose()
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title=settings.app_name, version="0.1.0", description=DESCRIPTION, lifespan=lifespan)
-    app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_methods=["*"], allow_headers=["*"])
+    app = FastAPI(title=settings.app_name, version="0.2.0", description=DISCLAIMER, openapi_tags=TAGS, lifespan=lifespan)
+    app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True,
+                       allow_methods=["*"], allow_headers=["*"])
     register_error_handlers(app)
-    app.include_router(api_router, prefix="/api/v1")
+    app.include_router(api_router, prefix=API_PREFIX)
     return app
 
 

@@ -1,11 +1,14 @@
-from fastapi import APIRouter
+from typing import Literal
 
-from app.application.dtos.signals import StatisticsResponse
-from app.presentation.api.responses import not_implemented
+from fastapi import APIRouter, Depends
+
+from app.application.dtos.signals import Statistics
+from app.presentation.api.dependencies import statistics as statistics_uc
 
 router = APIRouter(prefix="/statistics", tags=["Statistics"])
 
 
-@router.get("", response_model=StatisticsResponse, summary="Reports by age group, sex, country, seriousness over time (FR-08)")
-async def statistics(rxcui: str | None = None, drug_class: str | None = None, quarter: str | None = None):
-    not_implemented("Statistics")
+@router.get("", response_model=Statistics, summary="Report statistics (FR-08)")
+async def statistics(group_by: Literal["age_group", "sex", "country", "seriousness", "report_type", "quarter"],
+                     rxcui: str | None = None, quarter: str | None = None, uc=Depends(statistics_uc)):
+    return await uc.execute(group_by, rxcui, quarter)

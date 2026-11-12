@@ -1,48 +1,53 @@
-from typing import Literal
-
-from pydantic import BaseModel
-
-from app.application.dtos.common import Meta, Page
+from pydantic import BaseModel, Field
 
 
-class SignalItem(BaseModel):
+class SignalRow(BaseModel):
     rxcui: str
     drug: str
     reaction: str
+    quarter: str
     reports: int
+    a: int
+    b: int
+    c: int
+    d: int
     prr: float
     ci_lower: float
     chi_square: float
-    in_label: bool | None = None
-    novelty: Literal["known", "literature", "novel"] | None = None
-    trend: list[float] = []
+    is_signal: bool
+    is_emerging: bool
+    label_match: str   # FULL | PARTIAL | NONE
+    trend: list[float] = Field(default_factory=list)
 
 
-class SignalListResponse(BaseModel):
-    meta: Meta = Meta()
-    page: Page = Page()
-    items: list[SignalItem]
+class SignalList(BaseModel):
+    items: list[SignalRow]
+    total: int
+    quarter: str | None = None
+    match_coverage: float = 0.0
 
 
-class ReportItem(BaseModel):
+class ReportBrief(BaseModel):
     report_id: str
     receive_date: str
-    serious: bool
-    sex: str | None = None
-    age_group: str | None = None
+    serious: bool | None = None
+    age_group: str
+    sex: str
     country: str | None = None
-    reactions: list[str] = []
+    reactions: list[str]
+    suspect_drugs: list[str]
 
 
-class SignalReportsResponse(BaseModel):
-    meta: Meta = Meta()
-    page: Page = Page()
-    items: list[ReportItem]
+class SignalReports(BaseModel):
+    items: list[ReportBrief]
+    total: int
 
 
-class StatisticsResponse(BaseModel):
-    meta: Meta = Meta()
-    by_age_group: dict[str, int] = {}
-    by_sex: dict[str, int] = {}
-    by_country: dict[str, int] = {}
-    serious_over_time: list[dict] = []  # [{"quarter": "Q3 2026", "serious": 118, "all": 420}]
+class StatBucket(BaseModel):
+    group: str
+    value: int
+
+
+class Statistics(BaseModel):
+    group_by: str
+    buckets: list[StatBucket]

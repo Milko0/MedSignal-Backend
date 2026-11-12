@@ -1,7 +1,6 @@
-from typing import NoReturn
-
 from fastapi import HTTPException
 
 
-def not_implemented(what: str) -> NoReturn:
-    raise HTTPException(status_code=501, detail=f"{what}: not implemented yet (skeleton)")
+def not_implemented(detail: str = "Not implemented yet") -> None:
+    """Placeholder for endpoints that are designed (Swagger) but not built yet."""
+    raise HTTPException(status_code=501, detail=detail)
