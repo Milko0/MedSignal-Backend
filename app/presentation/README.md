@@ -19,7 +19,7 @@ HTTP only: parse, authenticate, call a use case, return a DTO.
 
 | Item | Role |
 |---|---|
-| `api/v1/router.py` | Aggregates routers |
-| `api/v1/routers/` | health, auth, drugs, signals, statistics, shortages, cabinet, profile, admin/ |
-| `api/v1/dependencies.py` | DB handles, auth, roles, use-case wiring example |
-| `api/v1/error_handlers.py` | Domain exceptions to HTTP codes |
+| `api/router.py` | Aggregates routers |
+| `api/routers/` | health, auth, drugs, signals, statistics, shortages, cabinet, profile, admin/ |
+| `api/dependencies.py` | DB handles, auth, roles, use-case wiring example |
+| `api/error_handlers.py` | Domain exceptions to HTTP codes |

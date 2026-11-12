@@ -141,7 +141,7 @@ MedSignal-Backend/
 ├── .env.example  Dockerfile  requirements.txt  requirements-dev.txt  pytest.ini  .gitignore  README.md
 ```
 
-The URL prefix `/api/v1` is set once in `app/main.py` (URL versioning); the folders are flat.
+The URL prefix `/api` is set once in `app/core/constants.py` (`API_PREFIX`); the folders are flat.
 
 ## 3. The clean data model
 
@@ -196,32 +196,17 @@ Every list response returns `match_coverage`, the share of reports whose drugs w
 
 ## 5. Functionalities and endpoints
 
-Prefix `/api/v1`. Requirement IDs refer to the *Actors and Requirements* document. Roles: **Guest** (no token), **User** (JWT), **Admin** (JWT with role admin).
+The API reference is **Swagger UI at `http://localhost:8000/docs`** (OpenAPI JSON at `/openapi.json`); it is generated
+from the code, so it is never out of date. Endpoints are not listed here on purpose. Every route is under the prefix `/api`
+and names its requirement ID (FR-xx) in its summary.
 
-| Area | Endpoint | Requirement | Role | State |
-|---|---|---|---|---|
-| Health | `GET /health` | - | Guest | works |
-| Auth | `POST /auth/register`, `POST /auth/login` | FR-11, FR-12 | Guest | works |
-| Search | `GET /drugs?query=` (typo tolerant, normalised to RxCUI) | FR-01 | Guest | works |
-| Drug 360 | `GET /drugs/{rxcui}/overview?dosage_form=&route=` | FR-02 | Guest (follow state needs login) | works |
-| Trend | `GET /drugs/{rxcui}/reaction-trend` | FR-03 | Guest | works |
-| Label gaps | `GET /drugs/{rxcui}/label-gaps` | FR-07 | Guest | works |
-| Signals | `GET /signals` (quarter, rxcui, reaction, min_reports) | FR-04, FR-05 | Guest | works |
-| Emerging | `GET /signals/emerging` | FR-06 | Guest | works |
-| Signal reports | `GET /signals/{rxcui}/{reaction}/reports` | FR-09 | Guest | works |
-| Statistics | `GET /statistics?group_by=` (age group, sex, country, seriousness over time) | FR-08 | Guest | works |
-| Alternatives | `GET /shortages/{rxcui}/alternatives` (same route and form, not in shortage) | FR-10 | Guest | works |
-| My medicines | `GET /cabinet`, `POST /cabinet/follows`, `DELETE /cabinet/follows/{rxcui}` | FR-15, FR-16 | User | works |
-| Alerts | `GET /cabinet/alerts`, `DELETE /cabinet/alerts[/{id}]` | FR-17, FR-18 | User | works |
-| Profile | `GET/PATCH/DELETE /profile`, `POST /profile/password`, `GET/PUT /profile/alert-settings` | FR-13, FR-14 | User | works |
-| Ingestion logs | `GET /admin/ingestion/runs` | FR-21 | Admin | works |
-| Excluded terms | `GET/POST/DELETE /admin/excluded-terms` | FR-26 | Admin | works |
-| Reconciliation | `POST /admin/reconciliation` | FR-27 | Admin | works (shortage summaries) |
-| Ingestion triggers | `POST /admin/ingestion/faers`, `/incremental` | FR-19, FR-20 | Admin | 501: use the scripts or the worker |
-| Admin CRUD | `/admin/reports`, `/labels`, `/shortages`, `/users` (list, create, read, update, delete) | FR-22 to FR-25 | Admin | 501 stub |
-| Background | Daily shortage poll with history, name normalisation at ingestion, signal recompute and alerts | FR-28 to FR-30 | System | use cases done; worker polls shortages |
+Roles: **Guest** (no token: search, Drug 360, trend, label gaps, signals, statistics, alternatives), **User** (JWT: my medicines,
+alerts, profile, logout), **Admin** (JWT with role `admin`: everything under `/api/admin`, used only through Swagger).
+In Swagger: `POST /api/auth/login`, copy `access_token`, press **Authorize** and paste it. `POST /api/auth/logout` revokes the
+token at once (its id is stored in Redis until the token would have expired).
 
-There is no admin screen in the UI: admin functions are used through Swagger (`/docs`).
+Lists that grow with the data are paginated with `page` (from 1) and `page_size` (default 10, max 100) and return
+`items`, `total`, `page`, `page_size`, `total_pages`. Drug search returns the best matches only (`limit`), not pages.
 
 ## 6. Data layer
 
@@ -322,7 +307,7 @@ Copy `.env.example` to `.env`.
 python -m venv .venv && . .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 cp .env.example .env
-python -m pytest                                    # 69 tests, no network and no databases needed
+python -m pytest                                    # no network and no databases needed
 uvicorn app.main:app --reload                       # http://localhost:8000/docs  (empty until data/clean exists)
 python -m app.worker                                # second terminal: daily shortage poll
 ```
@@ -340,12 +325,20 @@ Everything in containers (databases, API, worker, frontend at http://localhost:8
 
 ```bash
 python -m scripts.download_raw --out data/raw --ndc 20000 --labels 5000 --recalls 20000    # shortages, NDC, labels, recalls
-python -m scripts.download_faers ...                                                      # FAERS partitions
-python -m scripts.build_clean_dataset --raw-dir data/raw --faers "data/faers/*.json" --out data/clean --link-recalls
+python -m scripts.download_faers --latest 4 --parts-per-quarter 2 --dry-run                 # see sizes first
+python -m scripts.download_faers --latest 4 --parts-per-quarter 2 --prune                   # FAERS zips -> data/faers
+python -m scripts.build_clean_dataset --raw-dir data/raw --faers "data/faers/*.json.zip" --out data/clean --link-recalls
 ```
 
-The script prints the build report (records loaded and skipped, match rates, signals per quarter) and the total size of the clean
-dataset: the brief asks for at least 50-100 MB. `STORAGE_BACKEND=memory uvicorn app.main:app` then serves everything from `data/clean`.
+The script prints the build report (records loaded and skipped, match rates, signals per quarter, quarters dropped by the
+window) and the total size of the clean dataset: the brief asks for at least 50-100 MB. `STORAGE_BACKEND=memory uvicorn app.main:app`
+then serves everything from `data/clean`.
+
+**Rolling window.** The dataset keeps the newest `FAERS_WINDOW_QUARTERS` calendar quarters (default 4). Loading a new quarter
+drops the oldest one, reports and signals together (Q1 Q2 Q3 Q4 -> Q2 Q3 Q4 Q5), so the size stays bounded locally and on the
+Virtual Lab. `--prune` does the same for the downloaded zips. FAERS is published quarterly; shortages are polled daily by the worker.
+`--parts-per-quarter` samples the same number of partitions in every quarter (~12k reports each), so PRRs stay comparable.
+`data/` is git-ignored: the repository holds the scripts that rebuild the dataset, not the data.
 
 **Tests**
 
@@ -358,7 +351,7 @@ dataset: the brief asks for at least 50-100 MB. `STORAGE_BACKEND=memory uvicorn 
 
 What the tests prove: the 2x2 counts and PRR of a synthetic world to the unit, cache-aside and idempotent event handling (a replayed
 shortage poll creates no new alerts), alerts expiring after 30 days, typo tolerant search.
-Note: the old `tests/integration/test_api_skeleton.py` asserted HTTP 501 on use cases that now work; remove those assertions (only the admin CRUD and ingestion triggers stay 501).
+
 
 ## 10. Handoff to the database adapters (phases 4-5)
 

@@ -59,6 +59,7 @@ async def test_report_upsert_keeps_highest_version_and_counts(c):
     pc2 = await c.reports.pair_counts("2026Q1", RoleFilter.SUSPECT, {"NAUSEA"})
     assert pc2.per_pair == {} and await c.reports.quarters() == ["2026Q1"]
     assert await c.reports.delete("10000001") and not await c.reports.delete("10000001")
+    assert await c.reports.delete_quarter("2026Q1") == 1 and await c.reports.quarters() == []   # rolling window
 
 
 async def test_signal_search_and_history(c):
@@ -70,6 +71,8 @@ async def test_signal_search_and_history(c):
     assert total == 1 and found[0].prr == 3.0
     assert await c.signals.previous_prrs("1", "R", "2026Q3") == [2.0, 3.0] and await c.signals.trend("1", "R", 2) == [3.0, 4.0]
     assert await c.signals.latest_quarter() == "2026Q3" and await c.signals.signal_count("1", "2026Q1") == 1
+    assert await c.signals.delete_quarter("2026Q1") == 1 and await c.signals.delete_quarter("2026Q1") == 0
+    assert await c.signals.previous_prrs("1", "R", "2026Q3") == [3.0]
 
 
 async def test_shortage_replace_and_events(c):
@@ -133,3 +136,12 @@ async def test_shortage_status_and_counters(c):
     await c.counters.set_count("1", "R", "2026Q1", 5)
     await c.counters.set_count("1", "R", "2026Q1", 5)                             # a replay does not double count
     assert await c.counters.get_count("1", "R", "2026Q1") == 5 and await c.counters.get_count("1", "X", "2026Q1") is None
+
+
+async def test_revoked_tokens_expire(c):
+    assert not await c.revoked_tokens.is_revoked("j1")
+    await c.revoked_tokens.revoke("j1", 60)
+    await c.revoked_tokens.revoke("j1", 60)                                       # idempotent
+    assert await c.revoked_tokens.is_revoked("j1") and not await c.revoked_tokens.is_revoked("j2")
+    c.clock.set(NOW + timedelta(seconds=61))
+    assert not await c.revoked_tokens.is_revoked("j1")                           # gone with the token's lifetime

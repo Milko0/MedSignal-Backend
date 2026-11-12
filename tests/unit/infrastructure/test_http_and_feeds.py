@@ -100,3 +100,5 @@ async def test_file_feeds_formats(tmp_path):
     with zipfile.ZipFile(tmp_path / "part.zip", "w") as z:
         z.writestr("event-0001.json", json.dumps({"results": [{"safetyreportid": "1"}]}))
     assert [r async for r in feeds.read_bulk_file(str(tmp_path / "part.zip"))] == [{"safetyreportid": "1"}]
+    (tmp_path / "list.json").write_text('  [{"x": 1.5}, {"x": 2}]')                 # top-level array, streamed
+    assert [r async for r in feeds.read_bulk_file(str(tmp_path / "list.json"))] == [{"x": 1.5}, {"x": 2}]

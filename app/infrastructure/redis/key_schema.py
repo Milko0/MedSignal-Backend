@@ -6,6 +6,7 @@ followers:{rxcui}                     SET    users following a drug (reverse ind
 alert:{userId}:{eventId}              HASH   one alert, TTL 30 days
 alerts:{userId}                       ZSET   alert ids scored by timestamp
 count:{rxcui}:{reaction}:{quarter}    STRING live counter, SET by recomputation (idempotent)
+revoked:{jti}                         STRING revoked access token (logout), TTL = token's remaining life
 """
 
 
@@ -31,3 +32,7 @@ def alert_index(user_id: str) -> str:
 
 def counter(rxcui: str, reaction: str, quarter: str) -> str:
     return f"count:{rxcui}:{reaction}:{quarter}"
+
+
+def revoked_token(jti: str) -> str:
+    return f"revoked:{jti}"

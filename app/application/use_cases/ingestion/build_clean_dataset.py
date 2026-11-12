@@ -9,6 +9,9 @@ from app.application.container import Container
 from app.application.ingestion.transformers.ndc_product import transform_ndc_product
 from app.application.ports.external_data_source import NdcFeed
 from app.application.services.ingredient_resolver import IngredientResolver
+from app.application.use_cases.ingestion.apply_retention_window import (
+    ApplyRetentionWindow,
+)
 from app.application.use_cases.ingestion.compute_quarter_signals import (
     ComputeQuarterSignals,
 )
@@ -30,6 +33,7 @@ class BuildReport:
     faers_run: dict = field(default_factory=dict)
     recall_links: dict = field(default_factory=dict)
     signals: list[dict] = field(default_factory=list)
+    retention: dict = field(default_factory=dict)
     skipped_products: int = 0
 
 
@@ -40,7 +44,8 @@ class BuildCleanDataset:
         self.ndc_feed, self.label_feed, self.recall_feed = ndc_feed, label_feed, recall_feed
         self.shortage_feed, self.report_feed, self.normalizer, self.dispatcher = shortage_feed, report_feed, normalizer, dispatcher
 
-    async def execute(self, faers_paths: list[str], link_recalls: bool = False, min_a: int = 3) -> BuildReport:
+    async def execute(self, faers_paths: list[str], link_recalls: bool = False, min_a: int = 3,
+                      window_quarters: int | None = None) -> BuildReport:
         c, out = self.c, BuildReport()
         # 1. NDC products (carry the product rxcuis and the NDC -> ingredient map used by shortages)
         raw_products = [r async for r in self.ndc_feed.fetch_products()]
@@ -64,6 +69,10 @@ class BuildCleanDataset:
         # 4. reports
         run = await LoadFaersBulk(self.report_feed, c.reports, self.resolver, c.ingestion_runs, c.clock).execute(faers_paths)
         out.faers_run = {"loaded": run.records_loaded, "skipped": run.records_skipped, **run.stats}
+        # 4b. rolling window: keep the latest N calendar quarters (drops stragglers of old quarters too)
+        if window_quarters:
+            kept = await ApplyRetentionWindow(c.reports, c.signals, c.ingestion_runs, c.clock).execute(window_quarters)
+            out.retention = kept.__dict__
         # 5. recall links (candidates only)
         if link_recalls and self.normalizer is not None:
             stats = await LinkRecalls(c.recalls, self.normalizer, c.clock).execute()

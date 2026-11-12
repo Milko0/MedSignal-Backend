@@ -1,4 +1,5 @@
 """FR-04, FR-05: precomputed signals filtered by quarter, drug, reaction and minimum reports."""
+from app.application.dtos.common import PageRequest, page_meta
 from app.application.dtos.signals import SignalList, SignalRow
 from app.application.ports.ingredient_repository import IngredientRepository
 from app.application.ports.report_repository import ReportRepository
@@ -27,11 +28,14 @@ class ListSignals:
         self.signals, self.ingredients, self.reports = signals, ingredients, reports
 
     async def execute(self, quarter: str | None, rxcui: str | None = None, reaction: str | None = None,
-                      min_reports: int = 20, only_signals: bool = True, skip: int = 0, limit: int = 50) -> SignalList:
+                      min_reports: int = 20, only_signals: bool = True, page: PageRequest | None = None) -> SignalList:
+        page = page or PageRequest()
         quarter = quarter or await self.signals.latest_quarter()
         if quarter is None:
-            return SignalList(items=[], total=0)
+            return SignalList(items=[], **page_meta(0, page))
         found, total = await self.signals.search(
-            quarter, rxcui, normalize_reaction(reaction) if reaction else None, min_reports, only_signals, False, skip, limit)
-        return SignalList(items=await to_rows(found, self.ingredients, self.signals), total=total, quarter=quarter,
+            quarter, rxcui, normalize_reaction(reaction) if reaction else None, min_reports, only_signals, False,
+            page.skip, page.limit)
+        return SignalList(items=await to_rows(found, self.ingredients, self.signals), **page_meta(total, page),
+                          quarter=quarter,
                           match_coverage=round(await self.reports.match_coverage(quarter), 3))

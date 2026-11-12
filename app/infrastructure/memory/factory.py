@@ -18,7 +18,8 @@ def build_memory_container(clock=None) -> Container:
         signals=r.MemorySignalRepository(), users=r.MemoryUserRepository(),
         excluded_terms=r.MemoryExcludedTermRepository(), ingestion_runs=r.MemoryIngestionRunRepository(),
         shortage_status=s.MemoryShortageStatusStore(), follows=s.MemoryFollowStore(),
-        alerts=s.MemoryAlertStore(clock), counters=s.MemoryCounterStore(), clock=clock)
+        alerts=s.MemoryAlertStore(clock), counters=s.MemoryCounterStore(),
+        revoked_tokens=s.MemoryRevokedTokenStore(clock), clock=clock)
 
 
 async def build_loaded_container(data_dir: str, clock=None, seed_excluded_terms: bool = True) -> Container:

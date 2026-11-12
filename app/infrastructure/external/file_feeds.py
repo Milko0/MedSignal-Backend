@@ -1,8 +1,12 @@
 """Feeds that read raw exports from disk (openFDA bulk partitions, saved API pages). Same dictionaries as the API."""
+import io
 import json
 import zipfile
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from typing import IO
+
+import ijson
 
 from app.application.ports.external_data_source import (
     LabelFeed,
@@ -14,25 +18,31 @@ from app.application.ports.external_data_source import (
 
 
 def _records(path: Path) -> Iterator[dict]:
-    """.json ({"results": [...]} or a list), .jsonl, or a .zip with one of those inside."""
+    """.json ({"results": [...]} or a list), .jsonl, or a .zip with one of those inside.
+
+    Streams record by record (ijson), so memory stays flat even for a ~1 GB FAERS partition.
+    """
     if path.suffix == ".zip":
         with zipfile.ZipFile(path) as z:
             for name in z.namelist():
                 if name.endswith((".json", ".jsonl")):
                     with z.open(name) as f:
-                        yield from _parse(f.read().decode("utf-8"), name)
+                        yield from _parse(f, name)
         return
-    yield from _parse(path.read_text(encoding="utf-8"), path.name)
+    with path.open("rb") as f:
+        yield from _parse(f, path.name)
 
 
-def _parse(text: str, name: str) -> Iterator[dict]:
+def _parse(f: IO[bytes], name: str) -> Iterator[dict]:
     if name.endswith(".jsonl"):
-        for line in text.splitlines():
+        for line in io.TextIOWrapper(f, encoding="utf-8"):
             if line.strip():
                 yield json.loads(line)
         return
-    data = json.loads(text)
-    yield from (data.get("results", []) if isinstance(data, dict) else data)
+    stream = io.BufferedReader(f) if not isinstance(f, io.BufferedReader) else f
+    head = stream.peek(64).lstrip()
+    prefix = "item" if head.startswith(b"[") else "results.item"
+    yield from ijson.items(stream, prefix, use_float=True)
 
 
 class FileFeeds(ShortageFeed, NdcFeed, LabelFeed, RecallFeed, ReportFeed):

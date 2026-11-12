@@ -1,6 +1,6 @@
 """Shared constants: disclaimer (NFR-11), alert retention (NFR-09), URL prefix."""
 
-API_PREFIX = "/api/v1"
+API_PREFIX = "/api"
 
 DISCLAIMER = (
     "Adverse event reports are voluntary and unverified. "

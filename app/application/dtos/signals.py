@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+from app.application.dtos.common import PageMeta
+
 
 class SignalRow(BaseModel):
     rxcui: str
@@ -20,9 +22,8 @@ class SignalRow(BaseModel):
     trend: list[float] = Field(default_factory=list)
 
 
-class SignalList(BaseModel):
+class SignalList(PageMeta):
     items: list[SignalRow]
-    total: int
     quarter: str | None = None
     match_coverage: float = 0.0
 
@@ -38,9 +39,8 @@ class ReportBrief(BaseModel):
     suspect_drugs: list[str]
 
 
-class SignalReports(BaseModel):
+class SignalReports(PageMeta):
     items: list[ReportBrief]
-    total: int
 
 
 class StatBucket(BaseModel):

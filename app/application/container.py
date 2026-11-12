@@ -17,6 +17,7 @@ from app.application.ports.name_map_repository import NameMapRepository
 from app.application.ports.product_repository import ProductRepository
 from app.application.ports.recall_repository import RecallRepository
 from app.application.ports.report_repository import ReportRepository
+from app.application.ports.revoked_token_store import RevokedTokenStore
 from app.application.ports.rx_concept_repository import RxConceptRepository
 from app.application.ports.shortage_repository import ShortageRepository
 from app.application.ports.shortage_status_store import ShortageStatusStore
@@ -42,4 +43,5 @@ class Container:
     follows: FollowStore
     alerts: AlertStore
     counters: CounterStore
+    revoked_tokens: RevokedTokenStore
     clock: Clock

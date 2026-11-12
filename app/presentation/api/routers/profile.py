@@ -5,6 +5,7 @@ from app.application.dtos.profile import AlertSettingsDto, PasswordChange, Profi
 from app.presentation.api.dependencies import (
     CurrentUser,
     get_current_user,
+    logout_uc,
     manage_profile,
 )
 
@@ -22,8 +23,10 @@ async def update_profile(body: ProfileUpdate, user: CurrentUser = Depends(get_cu
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT, summary="Delete account (FR-14)")
-async def delete_profile(user: CurrentUser = Depends(get_current_user), uc=Depends(manage_profile)):
+async def delete_profile(user: CurrentUser = Depends(get_current_user), uc=Depends(manage_profile),
+                         logout=Depends(logout_uc)):
     await uc.delete(user.user_id)
+    await logout.execute(user.jti, user.expires_at)
 
 
 @router.post("/password", status_code=status.HTTP_204_NO_CONTENT, summary="Change password")

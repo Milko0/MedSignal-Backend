@@ -7,3 +7,4 @@ def test_keys():
     assert k.followers("5640") == "followers:5640"
     assert k.alert("u1", "e9") == "alert:u1:e9"
     assert k.counter("5640", "NAUSEA", "2026Q3") == "count:5640:NAUSEA:2026Q3"
+    assert k.revoked_token("abc") == "revoked:abc"

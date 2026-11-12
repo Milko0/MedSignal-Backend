@@ -261,6 +261,12 @@ class MemoryReportRepository(ReportRepository):
     async def quarters(self):
         return sorted({r.quarter for r in self._d.values()})
 
+    async def delete_quarter(self, quarter):
+        ids = [k for k, r in self._d.items() if r.quarter == quarter]
+        for k in ids:
+            del self._d[k]
+        return len(ids)
+
     async def pair_counts(self, quarter, role_filter, excluded_terms):
         pc = PairCounts()
         per_drug: Counter = Counter()
@@ -387,6 +393,12 @@ class MemorySignalRepository(SignalRepository):
 
     async def latest_quarter(self):
         return max((s.quarter for s in self._d.values()), default=None)
+
+    async def delete_quarter(self, quarter):
+        ids = [k for k, s in self._d.items() if s.quarter == quarter]
+        for k in ids:
+            del self._d[k]
+        return len(ids)
 
 
 class MemoryUserRepository(UserRepository):

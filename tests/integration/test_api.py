@@ -25,6 +25,7 @@ def test_health_and_openapi(client):
     h = client.get(f"{P}/health").json()
     assert h["status"] == "ok" and h["reports"] == 401
     paths = client.get("/openapi.json").json()["paths"]
+    assert P == "/api" and "/api/auth/logout" in client.get("/openapi.json").json()["paths"]
     for p in ("/drugs", "/drugs/{rxcui}/overview", "/signals", "/signals/emerging", "/statistics",
               "/shortages/{rxcui}/alternatives", "/cabinet/follows", "/admin/ingestion/runs", "/profile/alert-settings"):
         assert f"{P}{p}" in paths
@@ -44,8 +45,10 @@ def test_signals_carry_the_disclaimer_and_numbers(client):
     assert body["data"]["match_coverage"] > 0.99
     gaps = client.get(f"{P}/drugs/{IBU}/label-gaps").json()
     assert gaps["meta"]["disclaimer"] == DISCLAIMER and gaps["data"]["gaps"][0]["match_level"] == "PARTIAL"
-    reports = client.get(f"{P}/signals/{IBU}/gastrointestinal haemorrhage/reports", params={"limit": 5}).json()
+    reports = client.get(f"{P}/signals/{IBU}/gastrointestinal haemorrhage/reports", params={"page": 2, "page_size": 5}).json()
     assert reports["total"] == 31 and len(reports["items"]) == 5
+    assert (reports["page"], reports["page_size"], reports["total_pages"]) == (2, 5, 7)
+    assert client.get(f"{P}/signals", params={"page_size": 101}).status_code == 422
 
 
 def test_drug_360_shortage_and_alternatives(client):
@@ -93,3 +96,26 @@ def test_profile_and_admin_roles(client, world):
     assert client.get(f"{P}/admin/reports", headers=admin).status_code == 501              # CRUD still a stub
     assert client.post(f"{P}/admin/reconciliation", headers=admin).json()["ingredients_checked"] >= 1
     assert client.delete(f"{P}/profile", headers=h).status_code == 204
+
+
+def test_logout_revokes_the_token(client):
+    assert client.post(f"{P}/auth/logout").status_code == 401                    # guests cannot log out
+    h = _login(client, "carla")
+    assert client.get(f"{P}/profile", headers=h).status_code == 200
+    assert client.post(f"{P}/auth/logout", headers=h).status_code == 204
+    r = client.get(f"{P}/profile", headers=h)
+    assert r.status_code == 401 and r.headers["www-authenticate"] == "Bearer"
+    assert client.post(f"{P}/auth/logout", headers=h).status_code == 401         # already revoked
+    assert client.get(f"{P}/drugs/{NAP}/overview", headers=h).status_code == 401  # a dead token is not a guest
+    h2 = _login(client, "carla")                                                   # a new login works again
+    assert client.get(f"{P}/profile", headers=h2).status_code == 200
+
+
+def test_protected_routes_need_a_token(client):
+    for method, path in (("GET", "/profile"), ("PATCH", "/profile"), ("DELETE", "/profile"),
+                         ("POST", "/profile/password"), ("GET", "/profile/alert-settings"),
+                         ("GET", "/cabinet"), ("GET", "/cabinet/alerts"), ("POST", "/cabinet/follows"),
+                         ("POST", "/auth/logout"), ("GET", "/admin/excluded-terms"), ("POST", "/admin/reconciliation")):
+        assert client.request(method, f"{P}{path}").status_code == 401, (method, path)
+    for path in ("/health", "/signals", "/statistics?group_by=sex", f"/drugs/{NAP}/overview"):   # open to guests
+        assert client.get(f"{P}{path}").status_code == 200, path

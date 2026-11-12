@@ -33,6 +33,8 @@ async def main() -> None:
     ap.add_argument("--out", default="data/clean")
     ap.add_argument("--link-recalls", action="store_true", help="propose drug candidates for recalls without ids")
     ap.add_argument("--min-a", type=int, default=3, help="store signal pairs with at least this many reports")
+    ap.add_argument("--window-quarters", type=int, default=None,
+                    help="keep only the newest N calendar quarters (default FAERS_WINDOW_QUARTERS; 0 = keep all)")
     a = ap.parse_args()
 
     s = get_settings()
@@ -51,7 +53,8 @@ async def main() -> None:
     dispatcher = AlertDispatcher(c.follows, c.alerts, c.users, c.clock)
 
     builder = BuildCleanDataset(c, resolver, feeds, feeds, feeds, feeds, feeds, normalizer, dispatcher)
-    report = await builder.execute(paths, link_recalls=a.link_recalls, min_a=a.min_a)
+    window = s.faers_window_quarters if a.window_quarters is None else a.window_quarters
+    report = await builder.execute(paths, link_recalls=a.link_recalls, min_a=a.min_a, window_quarters=window or None)
     meta = export_dataset(c, a.out)
     print(json.dumps({"build": report.__dict__, "dataset": meta}, indent=1, default=str))
     print(f"\nTotal size: {meta['total_megabytes']} MB")

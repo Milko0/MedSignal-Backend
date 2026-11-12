@@ -18,6 +18,6 @@ Key-value DB access. Self-hosted Redis (docker locally, VMs on the UNIPI Virtual
 
 | Item | Role |
 |---|---|
-| `key_schema.py` | shortage:{rxcui}, follows:{userId}, followers:{rxcui}, alert:{userId}:{eventId}, alerts:{userId}, count:{rxcui}:{reaction}:{quarter} |
+| `key_schema.py` | shortage:{rxcui}, follows:{userId}, followers:{rxcui}, alert:{userId}:{eventId}, alerts:{userId}, count:{rxcui}:{reaction}:{quarter}, revoked:{jti} (logout, TTL = token's remaining life) |
 | `client.py` | Client factory |
-| `stores/` | ShortageStatus, Follow, Alert, Counter stores (implemented) |
+| `stores/` | ShortageStatus, Follow, Alert, Counter, RevokedToken stores (implemented) |

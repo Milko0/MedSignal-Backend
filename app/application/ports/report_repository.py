@@ -18,6 +18,10 @@ class ReportRepository(ABC):
     async def delete(self, report_id: str) -> bool: ...
 
     @abstractmethod
+    async def delete_quarter(self, quarter: str) -> int:
+        """Deletes every report of the quarter (rolling window). Returns how many. Mongo: index {quarter: 1}."""
+
+    @abstractmethod
     async def count(self) -> int: ...
 
     @abstractmethod

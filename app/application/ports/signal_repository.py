@@ -24,3 +24,7 @@ class SignalRepository(ABC):
 
     @abstractmethod
     async def latest_quarter(self) -> str | None: ...
+
+    @abstractmethod
+    async def delete_quarter(self, quarter: str) -> int:
+        """Deletes every signal of the quarter (rolling window). Returns how many."""

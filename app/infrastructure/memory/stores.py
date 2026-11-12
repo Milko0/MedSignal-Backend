@@ -5,6 +5,7 @@ from datetime import timedelta
 from app.application.ports.alert_store import AlertStore
 from app.application.ports.counter_store import CounterStore
 from app.application.ports.follow_store import FollowStore
+from app.application.ports.revoked_token_store import RevokedTokenStore
 from app.application.ports.shortage_status_store import ShortageStatusStore
 from app.domain.entities.alert import Alert
 from app.domain.entities.shortage import ShortageSummary
@@ -93,3 +94,21 @@ class MemoryCounterStore(CounterStore):
 
     async def get_count(self, ingredient_rxcui, reaction, quarter):
         return self._d.get((ingredient_rxcui, reaction, quarter))
+
+
+class MemoryRevokedTokenStore(RevokedTokenStore):
+    def __init__(self, clock) -> None:
+        self._d: dict[str, object] = {}
+        self.clock = clock
+
+    async def revoke(self, jti, ttl_seconds):
+        self._d[jti] = self.clock.now() + timedelta(seconds=max(1, ttl_seconds))
+
+    async def is_revoked(self, jti):
+        expires = self._d.get(jti)
+        if expires is None:
+            return False
+        if expires <= self.clock.now():
+            del self._d[jti]
+            return False
+        return True

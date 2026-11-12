@@ -6,6 +6,7 @@ email-validator>=2.2
 pymongo>=4.13          # native async API (AsyncMongoClient); use Motor instead if the team keeps it
 redis>=5.0             # redis.asyncio
 httpx>=0.27
+ijson>=3.3             # streaming JSON: a FAERS part is ~0.5-1 GB of JSON
 PyJWT>=2.9
 bcrypt>=4.2
 APScheduler>=3.10,<4

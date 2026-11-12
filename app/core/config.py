@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     storage_backend: str = "memory"
     data_dir: str = "data/clean"
     cache_dir: str = "data/cache"
+    # Rolling window of FAERS quarters kept in the dataset (the oldest is dropped when a new one is loaded)
+    faers_window_quarters: int = 4
 
     mongo_uri: str = "mongodb://localhost:27017/?directConnection=true"
     mongo_db: str = "medsignal"

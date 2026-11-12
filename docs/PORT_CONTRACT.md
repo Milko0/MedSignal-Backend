@@ -41,6 +41,8 @@ natural id as `_id` (mapping below); do not store derived values the model recom
 | `RecallRepository.find_by_ingredient(accepted_only=True)` | Only `link.status == ACCEPTED`. `linked_share` = accepted / all recalls. |
 | `AlertStore.add` | Idempotent on `(user_id, alert_id)`; returns `False` if a live alert exists; an expired id may be created again. TTL 30 days. |
 | `CounterStore.set_count` | Overwrite, never increment. |
+| `ReportRepository.delete_quarter` / `SignalRepository.delete_quarter` | Rolling window (`ApplyRetentionWindow`): delete every document of the quarter, return how many (Mongo: `delete_many({quarter: q})` on the `{quarter: 1}` index). |
+| `RevokedTokenStore` | Logout. `revoke(jti, ttl)` is idempotent; the entry expires with the token (Redis `SET revoked:{jti} 1 EX ttl`). |
 | `ShortageStatusStore` | Holds `ShortageSummary` per **ingredient**; TTL is a cache TTL (the value can always be rebuilt). |
 
 ## Suggested MongoDB indexes (validate each with `explain()`, scripts/benchmark_indexes.py)

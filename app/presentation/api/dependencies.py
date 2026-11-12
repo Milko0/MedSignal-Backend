@@ -1,13 +1,16 @@
 """The ONLY place (with worker.py) that knows how use cases are built from the container."""
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import jwt
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.application.container import Container
+from app.application.dtos.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, PageRequest
 from app.application.use_cases.admin.manage_excluded_terms import ManageExcludedTerms
 from app.application.use_cases.auth.login import Login
+from app.application.use_cases.auth.logout import Logout
 from app.application.use_cases.auth.register import Register
 from app.application.use_cases.cabinet.dismiss_alert import DismissAlert
 from app.application.use_cases.cabinet.follow_drug import FollowDrug
@@ -31,13 +34,15 @@ from app.application.use_cases.sync.reconcile import Reconcile
 from app.core.config import Settings, get_settings
 from app.core.security import decode_access_token
 
-bearer = HTTPBearer(auto_error=False)
+bearer = HTTPBearer(auto_error=False, description="JWT from POST /api/auth/login")
 
 
 @dataclass
 class CurrentUser:
     user_id: str
     role: str
+    jti: str
+    expires_at: datetime
 
 
 def settings_dep() -> Settings:
@@ -49,21 +54,27 @@ def container(request: Request) -> Container:
 
 
 # ---- authentication ----
-def get_current_user_optional(creds: HTTPAuthorizationCredentials | None = Depends(bearer),
-                              settings: Settings = Depends(settings_dep)) -> CurrentUser | None:
-    """Guests have no token and get None."""
+async def get_current_user_optional(creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+                                    settings: Settings = Depends(settings_dep),
+                                    c: Container = Depends(container)) -> CurrentUser | None:
+    """Guests have no token and get None. A bad, expired or logged-out token is a 401, never a silent guest."""
     if creds is None:
         return None
     try:
         payload = decode_access_token(settings, creds.credentials)
     except jwt.PyJWTError as exc:
-        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
-    return CurrentUser(user_id=payload["sub"], role=payload.get("role", "user"))
+        raise HTTPException(status_code=401, detail="Invalid or expired token",
+                            headers={"WWW-Authenticate": "Bearer"}) from exc
+    if await c.revoked_tokens.is_revoked(payload["jti"]):
+        raise HTTPException(status_code=401, detail="Token has been revoked (logged out)",
+                            headers={"WWW-Authenticate": "Bearer"})
+    return CurrentUser(user_id=payload["sub"], role=payload.get("role", "user"), jti=payload["jti"],
+                       expires_at=datetime.fromtimestamp(payload["exp"], UTC))
 
 
 def get_current_user(user: CurrentUser | None = Depends(get_current_user_optional)) -> CurrentUser:
     if user is None:
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise HTTPException(status_code=401, detail="Authentication required", headers={"WWW-Authenticate": "Bearer"})
     return user
 
 
@@ -73,6 +84,13 @@ def require_role(*roles: str):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return user
     return checker
+
+
+# ---- pagination (every list endpoint that grows with the data) ----
+def pagination(page: int = Query(1, ge=1, description="1-based page number"),
+               page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE,
+                                      description=f"Items per page (max {MAX_PAGE_SIZE})")) -> PageRequest:
+    return PageRequest(page=page, page_size=page_size)
 
 
 # ---- use case providers ----
@@ -90,6 +108,7 @@ def recommend_alternatives(c: Container = Depends(container)):
     return RecommendAlternatives(c.ingredients, c.products, c.shortages, c.recalls, c.signals)
 def register_uc(c: Container = Depends(container)): return Register(c.users, c.clock)
 def login_uc(c: Container = Depends(container), s: Settings = Depends(settings_dep)): return Login(c.users, s)
+def logout_uc(c: Container = Depends(container)): return Logout(c.revoked_tokens, c.clock)
 def follow_drug(c: Container = Depends(container)): return FollowDrug(c.follows, c.ingredients)
 def unfollow_drug(c: Container = Depends(container)): return UnfollowDrug(c.follows)
 def list_followed(c: Container = Depends(container)):
