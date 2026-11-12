@@ -40,24 +40,22 @@ The only places that know concrete adapters are `app/infrastructure/container_fa
 Ports are named by purpose (`ShortageStatusStore`, `FollowStore`), not by technology.
 
 The backend runs as **two processes**: the API (`uvicorn app.main:app`) and the worker (`python -m app.worker`) with the daily
-shortage poll and, later, the MongoDB change-stream projector, so jobs never run once per API worker.
+shortage poll and the MongoDB change-stream projector, so jobs never run once per API worker.
 
 **Two storage backends behind the same ports** (`STORAGE_BACKEND`):
 
 | Value | What it is | Use |
 |---|---|---|
 | `memory` | Reference adapters over JSON Lines files in `DATA_DIR` (`data/clean/*.jsonl`) | Runs the whole API with real data and **no databases**. Defines the behaviour the database adapters must reproduce. |
-| `databases` | MongoDB + Redis adapters (`app/infrastructure/database_container.py`, written by the team) | Course deliverable: 3 replicas each, local and Virtual Lab. |
+| `databases` | MongoDB + Redis adapters (`app/infrastructure/database_container.py`) | Course deliverable: 3 replicas each, local and Virtual Lab. Same tests as `memory`. |
 
 ## 2. Folder structure
-
-`[TEAM]` marks what the database team writes (phases 4-5); everything else exists and is tested.
 
 ```
 MedSignal-Backend/
 ├── app/
 │   ├── main.py                      # App factory, lifespan (builds the container), CORS, Swagger metadata
-│   ├── worker.py                    # Separate process: scheduler (+ change-stream projector [TEAM])
+│   ├── worker.py                    # Separate process: scheduler + change-stream projector
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── config.py                # Pydantic BaseSettings (.env), incl. STORAGE_BACKEND, DATA_DIR, CACHE_DIR
@@ -94,22 +92,22 @@ MedSignal-Backend/
 │   ├── infrastructure/
 │   │   ├── clock.py
 │   │   ├── container_factory.py     # Picks memory or databases from STORAGE_BACKEND
-│   │   ├── database_container.py    # [TEAM] builds the Mongo + Redis adapters
+│   │   ├── database_container.py    # Builds the Mongo + Redis adapters (STORAGE_BACKEND=databases)
 │   │   ├── memory/                  # Reference adapters: repositories, stores, dataset (JSONL), factory
-│   │   ├── mongodb/                 # [TEAM]
+│   │   ├── mongodb/
 │   │   │   ├── client.py            # PyMongo async client, write concern majority, secondary reads
-│   │   │   ├── indexes.py           # All indexes in one place
-│   │   │   ├── repositories/        # One adapter per repository port (drug, excluded_term, ingestion_run,
-│   │   │   │                        # recall, report, shortage, signal, user, label, ...)
-│   │   │   └── pipelines/           # signal_counts, pair_counts, stats_by_group
-│   │   ├── redis/                   # [TEAM]
+│   │   │   ├── documents.py         # model <-> document (_id = natural id), bulk upserts
+│   │   │   ├── indexes.py           # All indexes in one place, each with the query it serves
+│   │   │   ├── repositories/        # One adapter per repository port (report, signal, ingredient, catalog,
+│   │   │   │                        # shortage, recall, user, excluded_term, ingestion_run)
+│   │   │   └── pipelines/           # signal_counts (pair counts, top reactions, trend), stats_by_group
+│   │   ├── redis/
 │   │   │   ├── client.py            # Single node or Sentinel, chosen by config
 │   │   │   ├── key_schema.py        # The only place where key strings are built
-│   │   │   └── stores/              # shortage_status, follow, alert, counter
+│   │   │   └── stores/              # shortage_status, follow, alert, counter, revoked_token
 │   │   ├── external/                # http (retry, backoff, rate limit), openfda_client, rxnorm_client,
 │   │   │                            # rxnorm_normalizer (disk cache), dailymed_client, file_feeds
-│   │   ├── sync/                    # [TEAM] change_stream_projector, checkpoint_store
-│   │   └── scheduling/              # jobs.py: daily shortage poll (FR-28)
+│   │   └── sync/                    # change_stream_projector, checkpoint_store (resume token)
 │   └── presentation/
 │       └── api/
 │           ├── router.py            # APIRouter aggregator
@@ -129,7 +127,8 @@ MedSignal-Backend/
 │   ├── download_raw.py              # shortages, NDC, labels, recalls -> data/raw
 │   ├── download_faers.py            # FAERS partitions
 │   ├── build_clean_dataset.py       # raw -> data/clean/*.jsonl (+ build report)
-│   ├── load_sample.py               # load a sample into the databases
+│   ├── refresh_dataset.py           # brand names + missing labels + signals, without a rebuild
+│   ├── seed_databases.py            # data/clean -> MongoDB (through the ports)
 │   ├── benchmark_indexes.py         # explain() before/after indexes
 │   └── medsignal_api_check.py       # live API sanity checks
 ├── deploy/
@@ -225,7 +224,7 @@ Lists that grow with the data are paginated with `page` (from 1) and `page_size`
 | `users`, `excluded_terms`, `ingestion_runs`, `sync_checkpoints` | Accounts, FR-26 terms, FR-21 logs, change-stream resume token |
 
 Indexes are defined in `infrastructure/mongodb/indexes.py` and must be justified with `explain()` before and after (`scripts/benchmark_indexes.py`).
-Suggested indexes are in `docs/PORT_CONTRACT.md`. Sharding candidate: hashed key on ingredient id or report id (never the date alone).
+Sharding candidate: hashed key on ingredient id or report id (never the date alone).
 
 **Redis (key-value DB, primary + 2 replicas + Sentinel)** - keys built only in `infrastructure/redis/key_schema.py`, **keyed by ingredient rxcui**:
 
@@ -236,6 +235,7 @@ Suggested indexes are in `docs/PORT_CONTRACT.md`. Sharding candidate: hashed key
 | `alert:{userId}:{alertId}` | HASH, TTL 30 days | One alert; the id is deterministic (`TYPE:ingredient:event`) so replays are safe |
 | `alerts:{userId}` | ZSET | Alert index by timestamp, pruned on read |
 | `count:{ingredient}:{reaction}:{quarter}` | STRING | Live counter, overwritten after a recount (never `INCRBY`) |
+| `revoked:{jti}` | STRING, TTL = token's remaining life | Logged-out access tokens |
 
 **Read path (cache-aside, Drug 360):** `GetDrug360` reads the `ShortageSummary` from the key-value store; on a miss it computes it from the
 documents and fills the cache with a TTL.
@@ -257,7 +257,8 @@ sequenceDiagram
   A-->>V: Drug360Response (meta.disclaimer)
 ```
 
-**Write path (event sync):** ingestion writes the documents, the projector overwrites the live values and creates alerts keyed by event id.
+**Write path (event sync):** ingestion writes the documents; the worker's projector watches `signals` and `shortages`, overwrites
+the live counters and shortage summaries and alerts the followers of a drug that gets a new signal (alert ids keyed by event).
 
 ```mermaid
 flowchart LR
@@ -268,7 +269,8 @@ flowchart LR
 ```
 
 Replays are safe: documents are upserted by id, Redis values are overwritten, alerts are keyed by event id. If the resume token
-expires, `Reconcile` (FR-27) rebuilds the live layer from MongoDB.
+expires, `Reconcile` (FR-27) rebuilds the live layer from MongoDB. Change streams need a replica set: on a single local `mongod`
+the worker runs `Reconcile` every 10 minutes instead (no signal alerts).
 
 ## 7. Tools
 
@@ -312,11 +314,24 @@ uvicorn app.main:app --reload                       # http://localhost:8000/docs
 python -m app.worker                                # second terminal: daily shortage poll
 ```
 
-With databases (`STORAGE_BACKEND=databases`, once the team adapters exist):
+**With MongoDB + Redis** (`STORAGE_BACKEND=databases`). Any local MongoDB and Redis work, for example a MongoDB
+service and `docker run -d --name redis -p 6379:6379 redis`, or the full cluster:
 
 ```bash
-docker compose -f deploy/docker-compose.local.yml up -d     # MongoDB x3, Redis x3, Sentinels
+docker compose -f deploy/docker-compose.local.yml up -d     # MongoDB x3 (replica set), Redis x3, Sentinels
 ```
+
+Then, once, load the dataset (a few minutes; indexes are created automatically), and start the API and worker with
+`STORAGE_BACKEND=databases` in `.env`:
+
+```bash
+python scripts/seed_databases.py --drop                    # data/clean -> MongoDB
+uvicorn app.main:app --reload                              # starts in about a second, no dataset in RAM
+python -m app.worker                                       # change-stream projector (replica set) or Reconcile
+```
+
+`pytest` also runs the conformance suite against the local MongoDB and Redis when they are reachable (test database
+`medsignal_test`, Redis db 15; never the real data), and skips that part otherwise.
 
 Everything in containers (databases, API, worker, frontend at http://localhost:8080):
 `docker compose -f deploy/docker-compose.local.yml --profile app up -d --build`.
@@ -334,11 +349,21 @@ The script prints the build report (records loaded and skipped, match rates, sig
 window) and the total size of the clean dataset: the brief asks for at least 50-100 MB. `STORAGE_BACKEND=memory uvicorn app.main:app`
 then serves everything from `data/clean`.
 
-**Rolling window.** The dataset keeps the newest `FAERS_WINDOW_QUARTERS` calendar quarters (default 4). Loading a new quarter
+**Rolling window.** The dataset keeps the newest `FAERS_WINDOW_QUARTERS` calendar quarters (default 4; we use 6). Loading a new quarter
 drops the oldest one, reports and signals together (Q1 Q2 Q3 Q4 -> Q2 Q3 Q4 Q5), so the size stays bounded locally and on the
 Virtual Lab. `--prune` does the same for the downloaded zips. FAERS is published quarterly; shortages are polled daily by the worker.
 `--parts-per-quarter` samples the same number of partitions in every quarter (~12k reports each), so PRRs stay comparable.
 `data/` is git-ignored: the repository holds the scripts that rebuild the dataset, not the data.
+
+**Improve a dataset without rebuilding.** `python -m scripts.refresh_dataset` loads `data/clean`, fills brand names from
+the NDC products, downloads prescription labels for the drugs that have signals but no label, recomputes the signals
+(label match) and writes `data/clean` back. Minutes instead of hours; `--skip-labels` runs offline.
+
+**Sharing the dataset (teammates do not rebuild).** The first build takes about 2 hours because every drug name is
+resolved once through RxNav. Zip `data/clean` (about 50 MB) and share it outside git (a GitHub Release asset or a drive);
+teammates unzip it into `data/clean`, then `python scripts/seed_databases.py --drop` fills MongoDB (it calls
+`load_dataset`, which writes through the ports in batches of 5,000).
+Keep `data/cache` too if you will rebuild: it holds every RxNav answer.
 
 **Tests**
 
@@ -346,32 +371,37 @@ Virtual Lab. `--prune` does the same for the downloaded zips. FAERS is published
 |---|---|
 | `tests/unit` | Domain rules and PRR (4.87 / 4.48 / about 1609), transformers on every source shape, pipeline, external clients with a mock transport, key schema, security |
 | `tests/integration` | OpenAPI paths, the API over a synthetic dataset, role protection of the admin area, dataset round trip |
-| `tests/conformance` | `test_port_contract.py`: every storage adapter must pass it (`ADAPTERS`) |
+| `tests/conformance` | `test_port_contract.py`: the memory adapters and the MongoDB + Redis adapters pass the same assertions |
 | `tests/e2e` | To be written against the compose databases |
 
 What the tests prove: the 2x2 counts and PRR of a synthetic world to the unit, cache-aside and idempotent event handling (a replayed
 shortage poll creates no new alerts), alerts expiring after 30 days, typo tolerant search.
 
 
-## 10. Handoff to the database adapters (phases 4-5)
+## 10. Database adapters
 
-The MongoDB and Redis adapters are not part of this work. They implement the same ports and must pass `tests/conformance`.
-See `docs/PORT_CONTRACT.md` (method contracts, `_id` mapping, suggested indexes, the `pair_counts` pipeline, Redis key changes).
+`app/infrastructure/mongodb` and `app/infrastructure/redis` implement every port and pass the same conformance suite as
+the memory adapters. `docs/PORT_CONTRACT.md` lists the `_id` mapping and the behaviour each method must keep.
+Design choices worth defending at the exam:
 
-Checklist:
-1. Implement the repositories in `infrastructure/mongodb/repositories` and the pipelines in `infrastructure/mongodb/pipelines`.
-2. Change the Redis stores and `key_schema.py` to ingredient-keyed keys and the `ShortageSummary` hash (section 6).
-3. Build the container in `app/infrastructure/database_container.py` and register it in `container_factory.py` and in `ADAPTERS` of `tests/conformance/test_port_contract.py`.
-4. Merge the new settings into `config.py` and the lifespan of `main.py`.
-5. Delete from the repo what the overlay replaces: `ports/drug_repository.py`, `ports/signal_calculator.py` (use the domain service) and the misplaced `use_cases/profile/{list_ingestion_runs,load_faers_bulk,update_labels_recalls,poll_shortages}.py`.
-6. Run the conformance suite, then `scripts/benchmark_indexes.py`.
+- **Documents keep the natural id as `_id`** (report id, rxcui, NDC, set id, signal id), so upserts are idempotent.
+  Reports keep only the highest version: the upsert filter matches only an older version, a newer one makes it fail on
+  the duplicate `_id`, which is ignored.
+- **`pair_counts` runs three aggregations** (per drug, per reaction, per pair) instead of one `$facet`, because a `$facet`
+  result is one document (16 MB cap) and a quarter has about 100k pairs.
+- **Indexes** (`mongodb/indexes.py`) each name the query they serve. MongoDB does not allow two array fields in one
+  compound index, so `suspect_ingredient_ids` is paired with `receive_date`, not with `reaction_pts`.
+- **Typo-tolerant search** scores names in the adapter (MongoDB Community has no edit-distance index); the name list is
+  ~100 KB and cached for 5 minutes.
+- **Redis holds only live state**: follows and alerts (source of truth, AOF), revoked tokens, and caches rebuilt from
+  MongoDB (shortage summaries, counters). Expiry is Redis `EXPIRE`, also checked against the clock so tests are exact.
 
 ## 11. Deployment on the UNIPI Virtual Lab
 
 1. One VM per replica: each runs one `mongod` and one Redis (primary on VM1, replicas on VM2 and VM3) plus a Sentinel, using `deploy/virtual-lab/docker-compose.node.yml` with `NODE_IP` and `VM1_IP` set in `.env`.
 2. Initiate the MongoDB replica set once from VM1: `deploy/virtual-lab/init-replica-lab.sh VM1_IP VM2_IP VM3_IP`.
 3. Run the API, the worker and the Nginx frontend image on VM1 (or a fourth VM) with `MONGO_URI` listing the three members and `REDIS_SENTINELS` listing the three Sentinels.
-4. Load `data/clean/*.jsonl` with `mongoimport` or the loader of the database container (`scripts/load_sample.py`); keep the dataset sample small enough for the lab resources.
+4. Load the dataset with `python scripts/seed_databases.py --drop` (from any machine that reaches the lab `MONGO_URI`); keep `FAERS_WINDOW_QUARTERS` small enough for the lab resources.
 
 The `virtual-lab` files are an untested template: confirm ports and networking with the instructors.
 
@@ -386,10 +416,10 @@ The `virtual-lab` files are an untested template: confirm ports and networking w
 | Ingestion use cases: FAERS load, shortage poll with history and alerts, labels and recalls update, signal computation, dataset builder | Done, tested with fakes |
 | In-memory reference adapters + JSONL dataset, conformance suite | Done |
 | External clients with retry and rate limit, RxNav disk cache | Done, tested with a mock transport; **not run against the live APIs** |
-| MongoDB adapters, aggregation pipelines, indexes, Redis stores, change-stream projector | Team (phases 4-5) |
+| MongoDB adapters, aggregation pipelines, indexes, Redis stores, change-stream projector | Done; conformance suite on local MongoDB 8 + Redis 8. Projector unit-tested; needs a replica set to run |
 | Admin CRUD, ingestion triggers over HTTP | 501 stubs |
 | Compose files, `virtual-lab` template | Compose works locally; `virtual-lab` untested |
-| Run on the real raw data (size, match rates, signal sanity) | **To do: run `scripts.build_clean_dataset` on the real downloads** |
+| Run on the real raw data (size, match rates, signal sanity) | Done: 6 quarters, ~133k reports, ~350 MB clean |
 
 Open questions: the UNII -> RxCUI lookup route of RxNav (client method exists, marked unverified), the exact RxNav behaviour for
 combination products, and whether the quarter should follow the FDA file quarter instead of `receivedate` (one function to change: `Quarter.from_date`).

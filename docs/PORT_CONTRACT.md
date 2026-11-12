@@ -1,12 +1,13 @@
-# Port contract: handoff for the MongoDB and Redis adapters
+# Port contract of the storage adapters
 
 Everything the API does goes through the ports in `app/application/ports`. The in-memory adapters in
-`app/infrastructure/memory` are the **reference behaviour**. A database adapter is correct when
-`tests/conformance/test_port_contract.py` passes with it (add a builder to `ADAPTERS`) and the API tests pass with
-`STORAGE_BACKEND=databases`.
+`app/infrastructure/memory` are the **reference behaviour**; the MongoDB (`infrastructure/mongodb`) and Redis
+(`infrastructure/redis`) adapters reproduce it. `tests/conformance/test_port_contract.py` runs the same assertions on
+both (the database run uses `medsignal_test` and Redis db 15, and is skipped when the databases are not running).
+Change a contract here, in the memory adapter, in the database adapter and in the conformance test together.
 
-Domain models are Pydantic: store `model.model_dump(mode="json")`, read with `Model.model_validate(doc)`. Keep the
-natural id as `_id` (mapping below); do not store derived values the model recomputes.
+Domain models are Pydantic: documents are `model.model_dump(mode="json", exclude_none=True)` with the natural id moved
+to `_id` (`mongodb/documents.py`), read back with `Model.model_validate`. Dates are ISO strings, which sort correctly.
 
 ## Mapping of ids
 
@@ -20,9 +21,9 @@ natural id as `_id` (mapping below); do not store derived values the model recom
 | `shortages` | `package_ndc` | **current** state only; `replace_current` removes records that left the list |
 | `shortage_events` | generated | append only |
 | `recalls` | `recall_number` | |
-| `name_map` | `(key_type, normalized)` | compound `_id` or unique index |
+| `name_map` | `"KEY_TYPE|normalized"` | the compound key as one string |
 | `signals` | `signal_id` = `quarter\|ingredient\|reaction\|role_filter` | upsert |
-| `users` | `user_id` | unique indexes on `username` and `email` (case-insensitive: store lower-case copies) |
+| `users` | `user_id` | unique indexes on the lower-case copies `username_lower`, `email_lower` |
 | `excluded_terms` | `term` | upper case |
 | `ingestion_runs` | `run_id` | |
 
@@ -37,7 +38,7 @@ natural id as `_id` (mapping below); do not store derived values the model recom
 | `ReportRepository.match_coverage(quarter)` | Reports with at least one `all_ingredient_ids` / all reports. |
 | `SignalRepository.search` | Sorted by `prr` desc, `a` desc. `only_signals` -> `is_signal`; `only_emerging` -> `is_emerging`; returns `(page, total)`. |
 | `SignalRepository.previous_prrs / trend` | Same ingredient and reaction, ascending by quarter; `previous_prrs` returns the last `n` quarters strictly before the given one. |
-| `IngredientRepository.search` | Typo tolerant over name, synonyms and brand names. Memory: exact 1.0, prefix 0.9, else difflib ratio >= 0.75. Mongo: a text index plus a fuzzy step (for example trigram or edit distance in the adapter) is enough; the conformance test only needs `ibuprofin -> ibuprofen` and a brand-name hit. |
+| `IngredientRepository.search` | Typo tolerant over name, synonyms and brand names. Memory: exact 1.0, prefix 0.9, else difflib ratio >= 0.75. Both adapters use `domain/services/name_search.py`; the Mongo adapter scores a cached name list (MongoDB Community has no edit-distance index). |
 | `RecallRepository.find_by_ingredient(accepted_only=True)` | Only `link.status == ACCEPTED`. `linked_share` = accepted / all recalls. |
 | `AlertStore.add` | Idempotent on `(user_id, alert_id)`; returns `False` if a live alert exists; an expired id may be created again. TTL 30 days. |
 | `CounterStore.set_count` | Overwrite, never increment. |
@@ -45,51 +46,30 @@ natural id as `_id` (mapping below); do not store derived values the model recom
 | `RevokedTokenStore` | Logout. `revoke(jti, ttl)` is idempotent; the entry expires with the token (Redis `SET revoked:{jti} 1 EX ttl`). |
 | `ShortageStatusStore` | Holds `ShortageSummary` per **ingredient**; TTL is a cache TTL (the value can always be rebuilt). |
 
-## Suggested MongoDB indexes (validate each with `explain()`, scripts/benchmark_indexes.py)
+## MongoDB indexes and pipelines
 
-| Collection | Index | Serves |
-|---|---|---|
-| `reports` | `{quarter: 1}` | `pair_counts`, statistics |
-| `reports` | `{suspect_ingredient_ids: 1, reaction_pts: 1}` (multikey) | reports behind a signal, top reactions, trend |
-| `reports` | `{suspect_ingredient_ids: 1, receive_date: -1}` | monthly trend |
-| `signals` | `{quarter: 1, is_signal: 1, prr: -1}` | signal explorer |
-| `signals` | `{ingredient_rxcui: 1, reaction_term: 1, quarter: 1}` (unique with `role_filter`) | history, trend |
-| `labels` | `{ingredient_rxcuis: 1, product_type: 1}` | label gaps |
-| `products` | `{ingredient_rxcuis: 1, routes: 1, dosage_form: 1}` | alternatives |
-| `shortages` | `{ingredient_rxcuis: 1}` and `{status: 1}` | Drug 360, alternatives |
-| `recalls` | `{"link.ingredient_rxcuis": 1, "link.status": 1}` | Drug 360 |
-| `ingredients` | `{"atc.class_id": 1}`, text index on `name`, `synonyms`, `brand_names` | same-class alternatives, search |
-| `users` | unique `username`, unique `email` | auth |
-
+Indexes live in `infrastructure/mongodb/indexes.py`, each with the query it serves; `scripts/benchmark_indexes.py`
+prints `explain()` with and without each one. A compound index may hold only ONE array field, so the reports index is
+`{suspect_ingredient_ids, receive_date, _id}` (the reaction filter is applied on the fetched documents).
 Sharding candidate for `reports`: hashed `report_id` (never `receive_date` alone).
 
-## Pipeline sketch for `pair_counts`
+`pair_counts` runs three pipelines (`mongodb/pipelines/signal_counts.py`): per drug, per reaction, per pair, each starting
+with `$match {quarter}`. Not one `$facet`: its output is one document (16 MB cap) and a quarter has ~100k pairs.
+Excluded terms are removed after `$unwind`, so a report keeps its other reactions.
 
-```
-[{ $match: {quarter: Q} },
- { $facet: {
-     total:   [{ $count: "n" }],
-     drugs:   [{ $unwind: "$suspect_ingredient_ids" }, { $group: {_id: "$suspect_ingredient_ids", n: {$sum: 1}} }],
-     reacts:  [{ $unwind: "$reaction_pts" }, { $match: {reaction_pts: {$nin: EXCLUDED}} }, { $group: {_id: "$reaction_pts", n: {$sum: 1}} }],
-     pairs:   [{ $unwind: "$suspect_ingredient_ids" }, { $unwind: "$reaction_pts" }, { $match: {reaction_pts: {$nin: EXCLUDED}} },
-               { $group: {_id: {d: "$suspect_ingredient_ids", r: "$reaction_pts"}, n: {$sum: 1}} }] } }]
-```
-`reaction_pts` and the id arrays are already de-duplicated per report by the transformer, so `$unwind` counts each report once.
-For very large quarters, run the `pairs` facet as its own `$merge` into a temporary collection.
+## Redis
 
-## Redis changes versus the first skeleton
+| Key | Port | Notes |
+|---|---|---|
+| `shortage:{ingredient}` HASH | `ShortageStatusStore` | `ShortageSummary`, `dosage_forms` comma-joined; cache TTL, rebuilt by `Reconcile` |
+| `follows:{user}` / `followers:{ingredient}` SET | `FollowStore` | both directions in one MULTI; source of truth |
+| `alert:{user}:{alertId}` HASH + `alerts:{user}` ZSET | `AlertStore` | `EXPIRE` 30 days; `expires_at` also checked against the clock; index pruned on read |
+| `count:{ingredient}:{reaction}:{quarter}` STRING | `CounterStore` | SET by the projector from the signal's `a`, never INCR |
+| `revoked:{jti}` STRING | `RevokedTokenStore` | value = expiry instant, `EX` = token's remaining life |
 
-- Shortage key is per **ingredient** and holds a `ShortageSummary` (`status`, `packages_in_shortage`, `packages_total`, `dosage_forms`).
-- `Alert` fields: `alert_id` (deterministic), `type`, `drug_rxcui`, `message`, `ref_type`, `ref_id`, `created_at`, `expires_at`.
-  Store as HASH with `EXPIRE` 30 days; keep the `alerts:{userId}` ZSET index and prune on read.
-- Follows and counters keep the key shapes, but the id is the **ingredient** rxcui.
-- `follows` and `alerts` are the source of truth for those entities (not rebuilt from MongoDB): AOF persistence and replicas.
+## Event sync
 
-## Phase 5 checklist
-
-1. Mongo repositories + indexes; run the conformance suite against them.
-2. Redis stores; run the conformance suite.
-3. `app/infrastructure/database_container.py` with `build_database_container(settings) -> Container`.
-4. Load `data/clean/*.jsonl` (`mongoimport --jsonArray` is not needed: the files are JSON Lines).
-5. Change-stream projector: overwrite `ShortageSummary` and counters from MongoDB, create alerts with `AlertDispatcher`, save the resume token; `Reconcile` is the fallback.
-6. Run `tests/integration/test_api.py` with `STORAGE_BACKEND=databases`.
+The worker (`app/worker.py`) runs `infrastructure/sync/change_stream_projector.py` on a replica set: it watches `signals`
+and `shortages` and calls `ProjectChangeEvent` (counter SET + signal alerts honouring the user's `min_reports`; shortage
+summary overwrite). The resume token is saved in `sync_checkpoints` every 200 changes and when the stream is quiet.
+On a standalone `mongod` there are no change streams: the worker runs `Reconcile` every 10 minutes instead.

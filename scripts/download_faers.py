@@ -94,9 +94,12 @@ def main() -> None:
 
     out.mkdir(parents=True, exist_ok=True)
     if a.prune:
+        # keep exactly the selection: old quarters AND extra partitions of a kept quarter would skew the sampling
+        wanted = {local_path(out, p).name for p in sel}
         for f in sorted(out.glob("*.json.zip")):
-            if f.name.split("-")[0] not in quarters:
-                print(f"  prune {f.name} (outside the window)")
+            if f.name not in wanted:
+                why = "outside the window" if f.name.split("-")[0] not in quarters else "not in the sample"
+                print(f"  prune {f.name} ({why})")
                 f.unlink()
     for p in sel:
         dest = local_path(out, p)

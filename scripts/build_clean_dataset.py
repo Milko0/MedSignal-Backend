@@ -9,6 +9,8 @@ import argparse
 import asyncio
 import glob
 import json
+import logging
+import time
 
 from app.application.services.alert_dispatcher import AlertDispatcher
 from app.application.services.ingredient_resolver import IngredientResolver
@@ -37,6 +39,9 @@ async def main() -> None:
                     help="keep only the newest N calendar quarters (default FAERS_WINDOW_QUARTERS; 0 = keep all)")
     a = ap.parse_args()
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    started = time.monotonic()
     s = get_settings()
     paths = sorted(p for pattern in a.faers for p in glob.glob(pattern))
     if not paths:
@@ -48,7 +53,8 @@ async def main() -> None:
 
     rx = HttpFetcher(s.rxnorm_requests_per_second, s.http_max_retries, s.http_timeout_seconds)
     normalizer = RxNormNormalizer(RxNavClient(s, rx), s.cache_dir)
-    resolver = IngredientResolver(normalizer, c.rx_concepts, c.ingredients, c.name_map, c.clock)
+    resolver = IngredientResolver(normalizer, c.rx_concepts, c.ingredients, c.name_map, c.clock,
+                                  concurrency=s.rxnorm_concurrency)
     feeds = FileFeeds(a.raw_dir)
     dispatcher = AlertDispatcher(c.follows, c.alerts, c.users, c.clock)
 
@@ -57,7 +63,7 @@ async def main() -> None:
     report = await builder.execute(paths, link_recalls=a.link_recalls, min_a=a.min_a, window_quarters=window or None)
     meta = export_dataset(c, a.out)
     print(json.dumps({"build": report.__dict__, "dataset": meta}, indent=1, default=str))
-    print(f"\nTotal size: {meta['total_megabytes']} MB")
+    print(f"\nTotal size: {meta['total_megabytes']} MB, built in {(time.monotonic() - started) / 60:.0f} min")
 
 
 if __name__ == "__main__":

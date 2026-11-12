@@ -1,22 +1,20 @@
-"""MongoDB adapter for the excluded_terms collection. TODO: implement the methods."""
-from __future__ import annotations
-
-from typing import AsyncIterator  # noqa: F401
-from datetime import datetime  # noqa: F401
-
 from app.application.ports.excluded_term_repository import ExcludedTermRepository
+from app.domain.entities.excluded_term import ExcludedTerm
+from app.infrastructure.mongodb.documents import from_doc, to_doc
 
 
 class MongoExcludedTermRepository(ExcludedTermRepository):
-    def __init__(self, db):
-        self._col = db['excluded_terms']
+    """`excluded_terms`, `_id` = term (upper case)."""
 
-    async def list(self) -> list[str]:
-        raise NotImplementedError
+    def __init__(self, db) -> None:
+        self.col = db["excluded_terms"]
 
-    async def add(self, term: str) -> None:
-        raise NotImplementedError
+    async def list(self):
+        return [from_doc(ExcludedTerm, d, "term") async for d in self.col.find({}, sort=[("_id", 1)])]
 
-    async def remove(self, term: str) -> None:
-        raise NotImplementedError
+    async def add(self, term):
+        doc = to_doc(term, "term")
+        await self.col.replace_one({"_id": doc["_id"]}, doc, upsert=True)
 
+    async def remove(self, term):
+        return (await self.col.delete_one({"_id": term})).deleted_count == 1

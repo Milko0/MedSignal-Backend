@@ -15,14 +15,17 @@ class AlertDispatcher:
         self.follows, self.alerts, self.users, self.clock = follows, alerts, users, clock
 
     async def dispatch(self, type: AlertType, ingredient_rxcui: str, ref_id: str, message: str,
-                       ref_type: str | None = None) -> int:
-        """Returns the number of NEW alerts. The id is deterministic, so a replayed event creates nothing new."""
+                       ref_type: str | None = None, reports: int | None = None) -> int:
+        """Returns the number of NEW alerts. The id is deterministic, so a replayed event creates nothing new.
+        `reports` (signals): users whose alert setting min_reports is higher are skipped."""
         created = 0
         now = self.clock.now()
         for user_id in await self.follows.followers(ingredient_rxcui):
             user = await self.users.get_by_id(user_id)
             if user is not None and not getattr(user.settings, _SETTING[type]):
                 continue  # the user switched this kind of alert off
+            if user is not None and reports is not None and reports < user.settings.min_reports:
+                continue  # too few reports for this user's threshold
             alert = Alert(alert_id=f"{type.value}:{ingredient_rxcui}:{ref_id}", user_id=user_id, type=type,
                           drug_rxcui=ingredient_rxcui, message=message, ref_type=ref_type, ref_id=ref_id,
                           created_at=now)

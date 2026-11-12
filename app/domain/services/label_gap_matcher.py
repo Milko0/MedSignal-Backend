@@ -1,5 +1,6 @@
 """FR-07: is a frequently reported reaction mentioned in the label? FULL / PARTIAL / NONE."""
 import re
+from functools import lru_cache
 
 from app.domain.entities.enums import LabelMatch
 from app.domain.entities.label import LabelGapCandidate
@@ -7,21 +8,38 @@ from app.domain.value_objects.reaction_term import normalize_reaction
 
 _STOP = {"AND", "THE", "OF", "OR", "NOS", "WITH", "FOR", "NOT", "DUE", "TO", "IN", "ON", "A", "AN"}
 
+# MedDRA terms use British spelling, US labels American: DIARRHOEA/diarrhea, HAEMORRHAGE/hemorrhage, OEDEMA/edema,
+# DYSPNOEA/dyspnea, ANAEMIA/anemia, TUMOUR/tumor. Both sides are folded the same way, only for comparison.
+_SPELLING = (("AE", "E"), ("OE", "E"), ("OUR", "OR"))
+
+
+@lru_cache(maxsize=512)   # label texts are long and asked once per signal: fold each only once
+def _fold(text: str) -> str:
+    text = normalize_reaction(text)
+    for british, american in _SPELLING:
+        text = text.replace(british, american)
+    return text
+
+
+@lru_cache(maxsize=512)
+def _words(folded_text: str) -> frozenset[str]:
+    return frozenset(re.findall(r"[A-Z0-9]+", folded_text))
+
 
 def _tokens(text: str) -> list[str]:
-    return [t for t in re.findall(r"[A-Z0-9]+", normalize_reaction(text)) if t not in _STOP and len(t) > 2]
+    return [t for t in re.findall(r"[A-Z0-9]+", _fold(text)) if t not in _STOP and len(t) > 2]
 
 
 def match_level(term: str, label_text: str) -> LabelMatch:
     """FULL: the whole term appears as a phrase. PARTIAL: some or all significant words appear apart.
-    NONE: no significant word appears. First version: word matching, no MedDRA hierarchy or synonyms."""
-    text = normalize_reaction(label_text)
-    t = normalize_reaction(term)
+    NONE: no significant word appears. Word matching after spelling folding; no MedDRA hierarchy or synonyms."""
+    text = _fold(label_text)
+    t = _fold(term)
     if not text or not t:
         return LabelMatch.NONE
     if t in text:
         return LabelMatch.FULL
-    words = set(re.findall(r"[A-Z0-9]+", text))
+    words = _words(text)
     toks = _tokens(term)
     if toks and any(tok in words for tok in toks):
         return LabelMatch.PARTIAL

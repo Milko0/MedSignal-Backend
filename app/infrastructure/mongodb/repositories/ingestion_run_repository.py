@@ -1,22 +1,21 @@
-"""MongoDB adapter for the ingestion_runs collection. TODO: implement the methods."""
-from __future__ import annotations
-
-from typing import AsyncIterator  # noqa: F401
-from datetime import datetime  # noqa: F401
-
 from app.application.ports.ingestion_run_repository import IngestionRunRepository
+from app.domain.entities.ingestion_run import IngestionRun
+from app.infrastructure.mongodb.documents import from_doc, to_doc
 
 
 class MongoIngestionRunRepository(IngestionRunRepository):
-    def __init__(self, db):
-        self._col = db['ingestion_runs']
+    """`ingestion_runs`, `_id` = run_id, newest first on the {started_at: -1} index (FR-21)."""
 
-    async def start(self, kind: str) -> str:
-        raise NotImplementedError
+    def __init__(self, db) -> None:
+        self.col = db["ingestion_runs"]
 
-    async def finish(self, run_id: str, records: int, errors: list[str]) -> None:
-        raise NotImplementedError
+    async def add(self, run):
+        doc = to_doc(run, "run_id")
+        await self.col.replace_one({"_id": doc["_id"]}, doc, upsert=True)
 
-    async def list(self, limit: int = 50) -> list[dict]:
-        raise NotImplementedError
+    async def update(self, run):
+        await self.add(run)
 
+    async def list(self, skip=0, limit=50):
+        cursor = self.col.find({}, sort=[("started_at", -1)], skip=skip, limit=limit)
+        return [from_doc(IngestionRun, d, "run_id") async for d in cursor]

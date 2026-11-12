@@ -5,7 +5,7 @@
 | Layer | Imports | Never imports |
 |---|---|---|
 | domain | nothing | everything else |
-| application | domain, core | Motor, redis-py, httpx, FastAPI |
+| application | domain, core | PyMongo, redis-py, httpx, FastAPI |
 | infrastructure | application ports, domain, core | presentation |
 | presentation | application, core | infrastructure (except in `dependencies.py`) |
 

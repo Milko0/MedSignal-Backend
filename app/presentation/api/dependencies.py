@@ -34,7 +34,8 @@ from app.application.use_cases.sync.reconcile import Reconcile
 from app.core.config import Settings, get_settings
 from app.core.security import decode_access_token
 
-bearer = HTTPBearer(auto_error=False, description="JWT from POST /api/auth/login")
+bearer = HTTPBearer(auto_error=False, scheme_name="JWT",
+                    description="Paste the `access_token` from POST /api/auth/login (without the word Bearer)")
 
 
 @dataclass
@@ -115,7 +116,7 @@ def list_followed(c: Container = Depends(container)):
     return ListFollowed(c.follows, c.ingredients, c.shortage_status, c.shortages, c.clock)
 def list_alerts(c: Container = Depends(container)): return ListAlerts(c.alerts)
 def dismiss_alert(c: Container = Depends(container)): return DismissAlert(c.alerts)
-def manage_profile(c: Container = Depends(container)): return ManageProfile(c.users)
+def manage_profile(c: Container = Depends(container)): return ManageProfile(c.users, c.follows, c.alerts)
 def excluded_terms_uc(c: Container = Depends(container)): return ManageExcludedTerms(c.excluded_terms, c.clock)
 def ingestion_runs(c: Container = Depends(container)): return ListIngestionRuns(c.ingestion_runs)
 def reconcile(c: Container = Depends(container)): return Reconcile(c.ingredients, c.shortages, c.shortage_status, c.clock)

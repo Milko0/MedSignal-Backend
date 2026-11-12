@@ -15,10 +15,13 @@ class HttpFetcher:
         self._sleep = sleep
 
     async def _throttle(self) -> None:
-        wait = self._last + self.min_interval - time.monotonic()
-        if wait > 0:
-            await self._sleep(wait)
-        self._last = time.monotonic()
+        """Reserves the next free time slot before awaiting, so concurrent callers never share a slot:
+        with many requests in flight the rate stays at requests_per_second while network latency overlaps."""
+        now = time.monotonic()
+        slot = max(now, self._last + self.min_interval)
+        self._last = slot
+        if slot > now:
+            await self._sleep(slot - now)
 
     async def get_json(self, url: str, params: dict | None = None, allow_404: bool = False) -> dict | list | None:
         """Returns the decoded JSON. 404 returns None when allow_404 (openFDA answers 404 for 'no matches').

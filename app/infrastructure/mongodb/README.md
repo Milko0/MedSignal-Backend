@@ -1,27 +1,28 @@
 # infrastructure/mongodb
 
-Document DB access. Collections: `reports`, `labels`, `shortages`, `signals`, `recalls`, `drugs`, `users`, `excluded_terms`, `ingestion_runs`, `sync_checkpoints`.
+Document DB adapters. Collections: `reports`, `signals`, `ingredients`, `rx_concepts`, `products`, `labels`, `shortages`,
+`shortage_events`, `recalls`, `name_map`, `users`, `excluded_terms`, `ingestion_runs`, `sync_checkpoints`.
 
 ## Tools used
 
-- MongoDB 7, 3-member replica set (NFR-02)
-- Motor 3.x
+- MongoDB 7+ (3-member replica set on the cluster, NFR-02); a single `mongod` works for development
+- PyMongo native async API (`AsyncMongoClient`)
 - Aggregation pipelines (`pipelines/`)
 
 ## Rules
 
-- Writes use `w=majority` (NFR-03).
-- Heavy reads can use secondaries via `get_collection(..., secondary_ok=True)`.
-- Put `$match` before `$unwind` in the pair pipeline.
-- Sharding candidate: hashed key on drug code or report id (NFR-07).
+- Writes use `w=majority` (NFR-03); heavy reads can use secondaries via `get_collection(..., secondary_ok=True)`.
+- `_id` is the natural id of the model (`documents.py`); upserts are idempotent.
+- Every index is in `indexes.py` with the query it serves; check it with `scripts/benchmark_indexes.py`.
+- Sharding candidate for `reports`: hashed `report_id` (NFR-07).
 
 ## Contents
 
 | Item | Role |
 |---|---|
-| `client.py` | Motor client factory |
-| `indexes.py` | All indexes |
-| `repositories/` | One adapter per port (methods raise NotImplementedError) |
-| `pipelines/signal_counts.py` | Pipeline 1 (pair counts) |
-| `pipelines/pair_counts.py` | Pipeline 2 (stub) |
-| `pipelines/stats_by_group.py` | Pipeline 3 (stub) |
+| `client.py` | Client factory |
+| `documents.py` | Model <-> document mapping, bulk upserts |
+| `indexes.py` | All indexes, created at start-up (`ensure_indexes`) |
+| `repositories/` | One adapter per repository port |
+| `pipelines/signal_counts.py` | Pair counts, top reactions, monthly trend |
+| `pipelines/stats_by_group.py` | Report counts by age group, sex, country, seriousness, type, quarter |

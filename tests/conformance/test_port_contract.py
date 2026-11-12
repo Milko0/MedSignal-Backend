@@ -1,10 +1,14 @@
-"""Contract of the repository and store ports. Every adapter (memory today, MongoDB and Redis next) must pass the
-same assertions. To add an adapter: register a builder in ADAPTERS that returns a Container."""
+"""Contract of the repository and store ports. Every adapter (memory, and MongoDB + Redis) must pass the same
+assertions. The "databases" run uses the local MongoDB and Redis (MONGO_URI / REDIS_URL) and is skipped when they
+are not running."""
+import socket
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlparse
 
 import pytest
 
 from app.application.ingestion.transformers import transform_report
+from app.core.config import get_settings
 from app.domain.entities.alert import Alert
 from app.domain.entities.drug import Drug, DrugClass
 from app.domain.entities.enums import (
@@ -26,13 +30,48 @@ from app.infrastructure.memory.factory import build_memory_container
 from tests.fixtures import raw
 
 NOW = datetime(2026, 11, 10, tzinfo=UTC)
-ADAPTERS = {"memory": lambda clock: build_memory_container(clock)}
-# ADAPTERS["databases"] = lambda clock: <your Mongo + Redis container builder>   (phase 5)
+TEST_MONGO_DB = "medsignal_test"      # dropped before each test; never the real database
+TEST_REDIS_DB = 15                    # flushed before each test
 
 
-@pytest.fixture(params=sorted(ADAPTERS))
-def c(request):
-    return ADAPTERS[request.param](FixedClock(NOW))
+def _reachable(host: str, port: int) -> bool:
+    try:
+        socket.create_connection((host, port), timeout=0.5).close()
+        return True
+    except OSError:
+        return False
+
+
+@pytest.fixture(params=["memory", "databases"])
+async def c(request):
+    clock = FixedClock(NOW)
+    if request.param == "memory":
+        yield build_memory_container(clock)
+        return
+    from pymongo import AsyncMongoClient
+    from redis.asyncio import Redis
+
+    from app.infrastructure.database_container import create_database_container
+    from app.infrastructure.mongodb.indexes import ensure_indexes
+
+    s = get_settings()
+    redis_url = urlparse(s.redis_url)
+    mongo_host = (urlparse(s.mongo_uri).hostname or "localhost")
+    if not (_reachable(mongo_host, urlparse(s.mongo_uri).port or 27017)
+            and _reachable(redis_url.hostname or "localhost", redis_url.port or 6379)):
+        pytest.skip("MongoDB or Redis not running: start them to check the database adapters")
+    mongo = AsyncMongoClient(s.mongo_uri, serverSelectionTimeoutMS=2000)
+    redis = Redis(host=redis_url.hostname or "localhost", port=redis_url.port or 6379, db=TEST_REDIS_DB,
+                  decode_responses=True)
+    await mongo.drop_database(TEST_MONGO_DB)
+    await redis.flushdb()
+    db = mongo[TEST_MONGO_DB]
+    await ensure_indexes(db)
+    try:
+        yield create_database_container(db, redis, clock)
+    finally:
+        await redis.aclose()
+        await mongo.close()
 
 
 async def test_ingredient_search_and_class(c):

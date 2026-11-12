@@ -25,11 +25,20 @@ class DiskCache:
         if not self.dir:
             return None
         p = self._path(kind, key)
-        return json.loads(p.read_text()) if p.exists() else None
+        if not p.exists():
+            return None
+        try:
+            return json.loads(p.read_text())
+        except ValueError:          # a file cut by an interrupted run: ask again
+            return None
 
     def set(self, kind: str, key: str, value) -> None:
+        """Atomic (temp file + rename), so a run stopped with Ctrl+C never leaves half a file."""
         if self.dir:
-            self._path(kind, key).write_text(json.dumps(value))
+            p = self._path(kind, key)
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(json.dumps(value))
+            tmp.replace(p)
 
 
 class RxNormNormalizer(DrugNormalizer):

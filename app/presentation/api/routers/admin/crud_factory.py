@@ -5,7 +5,8 @@ from app.presentation.api.responses import not_implemented
 
 
 def make_crud_router(name: str, fr: str) -> APIRouter:
-    router = APIRouter(prefix=f"/{name}", tags=[f"Admin: {name}"])
+    router = APIRouter(prefix=f"/{name}", tags=[f"Admin: {name}"],
+                       responses={501: {"description": "Not implemented yet"}})
 
     @router.get("", summary=f"List {name} ({fr})")
     async def list_items(skip: int = 0, limit: int = 50):

@@ -39,7 +39,8 @@ class Settings(BaseSettings):
     dailymed_base_url: str = "https://dailymed.nlm.nih.gov/dailymed/services/v2"
     http_timeout_seconds: float = 60.0
     http_max_retries: int = 4
-    rxnorm_requests_per_second: float = 8.0   # RxNav allows 20/s; stay well below
+    rxnorm_requests_per_second: float = 15.0  # RxNav allows 20/s per IP; requests overlap, so latency is hidden
+    rxnorm_concurrency: int = 16              # lookups in flight at once during a build
     openfda_requests_per_second: float = 2.0
 
     @property

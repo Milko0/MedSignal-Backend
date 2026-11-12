@@ -53,3 +53,16 @@ class OpenFdaFeeds(ShortageFeed, NdcFeed, LabelFeed, RecallFeed):
 
     def fetch_recalls(self, limit: int | None = None) -> AsyncIterator[dict]:
         return self._pages("/drug/enforcement.json", limit)
+
+    async def labels_for_ingredient(self, name: str, limit: int = 2) -> list[dict]:
+        """Newest prescription labels of one ingredient. Exact generic name first ("SEMAGLUTIDE" -> Ozempic,
+        Wegovy); if none, a phrase search on the substance, which also finds salts ("ATORVASTATIN CALCIUM")."""
+        rx = 'openfda.product_type:"HUMAN PRESCRIPTION DRUG"'
+        safe = name.replace('"', "")
+        for field in (f'openfda.generic_name.exact:"{safe}"', f'openfda.substance_name:"{safe}"'):
+            data = await self.http.get_json(f"{self.base}/drug/label.json", self._params(
+                search=f"{field} AND {rx}", limit=limit, sort="effective_time:desc"), allow_404=True)
+            results = (data or {}).get("results") or []
+            if results:
+                return results
+        return []

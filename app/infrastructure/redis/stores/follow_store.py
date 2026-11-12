@@ -23,7 +23,7 @@ class RedisFollowStore(FollowStore):
     async def list_followed(self, user_id: str) -> set[str]:
         return set(await self._r.smembers(k.follows(user_id)))
 
-    async def followers_of(self, rxcui: str) -> set[str]:
+    async def followers(self, rxcui: str) -> set[str]:
         return set(await self._r.smembers(k.followers(rxcui)))
 
     async def is_following(self, user_id: str, rxcui: str) -> bool:

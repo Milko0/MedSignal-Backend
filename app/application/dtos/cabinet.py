@@ -4,6 +4,8 @@ from pydantic import BaseModel
 class FollowRequest(BaseModel):
     rxcui: str
 
+    model_config = {"json_schema_extra": {"examples": [{"rxcui": "1991302"}]}}
+
 
 class FollowedDrug(BaseModel):
     rxcui: str

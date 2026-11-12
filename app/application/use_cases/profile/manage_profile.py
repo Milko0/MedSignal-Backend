@@ -1,6 +1,8 @@
 """FR-13, FR-14: view, update and delete the profile; change password; alert settings."""
 from app.application.dtos.auth import UserResponse
 from app.application.dtos.profile import AlertSettingsDto, PasswordChange, ProfileUpdate
+from app.application.ports.alert_store import AlertStore
+from app.application.ports.follow_store import FollowStore
 from app.application.ports.user_repository import UserRepository
 from app.core.security import hash_password, verify_password
 from app.domain.entities.user import AlertSettings
@@ -16,8 +18,9 @@ def _dto(u) -> UserResponse:
 
 
 class ManageProfile:
-    def __init__(self, users: UserRepository) -> None:
-        self.users = users
+    def __init__(self, users: UserRepository, follows: FollowStore | None = None,
+                 alerts: AlertStore | None = None) -> None:
+        self.users, self.follows, self.alerts = users, follows, alerts
 
     async def _get(self, user_id: str):
         user = await self.users.get_by_id(user_id)
@@ -41,8 +44,15 @@ class ManageProfile:
         return _dto(user)
 
     async def delete(self, user_id: str) -> None:
+        """Removes the account and what hangs on it in the key-value store: followed drugs (both directions of the
+        many-to-many) and alerts."""
         if not await self.users.delete(user_id):
             raise NotFoundError("User not found")
+        if self.follows is not None:
+            for rxcui in await self.follows.list_followed(user_id):
+                await self.follows.unfollow(user_id, rxcui)
+        if self.alerts is not None:
+            await self.alerts.dismiss_all(user_id)
 
     async def change_password(self, user_id: str, body: PasswordChange) -> None:
         user = await self._get(user_id)

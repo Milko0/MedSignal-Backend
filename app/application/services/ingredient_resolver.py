@@ -3,7 +3,10 @@
 Rules (plan 6.4): a harmonised product rxcui maps through RxNav to its ingredient(s); an EXACT name match is
 accepted; an APPROXIMATE match is only stored as a candidate and never feeds signals until a person accepts it.
 """
-from collections.abc import Iterable
+import asyncio
+import logging
+import time
+from collections.abc import Awaitable, Callable, Iterable
 
 from app.application.ingestion.resolution import NameResolution
 from app.application.ingestion.transformers.common import unique
@@ -15,10 +18,37 @@ from app.domain.entities.enums import KeyType, LinkStatus, MatchMethod
 from app.domain.entities.name_mapping import NameMapping
 from app.domain.entities.rx_concept import RxConcept
 
+log = logging.getLogger("medsignal.resolver")
+
+
+async def run_bounded(items: list, work: Callable[[object], Awaitable], concurrency: int, label: str) -> list:
+    """Runs work(item) for every item with at most `concurrency` in flight; logs progress for long batches."""
+    if not items:
+        return []
+    sem = asyncio.Semaphore(max(1, concurrency))
+    done = 0
+    started = time.monotonic()
+    step = max(200, len(items) // 20)
+
+    async def one(item):
+        nonlocal done
+        async with sem:
+            result = await work(item)
+        done += 1
+        if len(items) >= 200 and (done % step == 0 or done == len(items)):
+            rate = done / max(time.monotonic() - started, 1e-6)
+            left = (len(items) - done) / rate if rate else 0
+            log.info("%s: %d/%d (%.0f%%), %.1f/s, ~%d min left", label, done, len(items),
+                     100 * done / len(items), rate, left // 60)
+        return result
+
+    return await asyncio.gather(*(one(i) for i in items))
+
 
 class IngredientResolver:
     def __init__(self, normalizer: DrugNormalizer, rx_concepts: RxConceptRepository,
-                 ingredients: IngredientRepository, name_map: NameMapRepository, clock) -> None:
+                 ingredients: IngredientRepository, name_map: NameMapRepository, clock, concurrency: int = 1) -> None:
+        self.concurrency = concurrency
         self.normalizer = normalizer
         self.rx_concepts = rx_concepts
         self.ingredients = ingredients
@@ -32,26 +62,23 @@ class IngredientResolver:
         cached = await self.rx_concepts.get_many(wanted)
         result = {rx: c.ingredient_rxcuis for rx, c in cached.items()}
         self.stats["rxcui_cached"] += len(cached)
-        new_concepts: list[RxConcept] = []
-        new_drugs = {}
-        for rx in wanted:
-            if rx in cached:
-                continue
-            self.stats["rxcui_lookups"] += 1
-            concept = await self.normalizer.concept(rx)
-            if concept is None:
-                concept = RxConcept(rxcui=rx)  # remember the miss so it is not asked again
-            new_concepts.append(concept)
-            result[rx] = concept.ingredient_rxcuis
-            for ing in concept.ingredient_rxcuis:
-                if ing not in new_drugs and await self.ingredients.get(ing) is None:
-                    drug = await self.normalizer.ingredient(ing)
-                    if drug:
-                        new_drugs[ing] = drug
+        missing = [rx for rx in wanted if rx not in cached]
+        self.stats["rxcui_lookups"] += len(missing)
+
+        async def lookup(rx: str) -> RxConcept:
+            # a miss is remembered (empty ingredients) so it is not asked again
+            return await self.normalizer.concept(rx) or RxConcept(rxcui=rx)
+
+        new_concepts = await run_bounded(missing, lookup, self.concurrency, "product rxcuis")
+        for concept in new_concepts:
+            result[concept.rxcui] = concept.ingredient_rxcuis
+        ingredient_ids = unique(i for c in new_concepts for i in c.ingredient_rxcuis)
+        unknown = [i for i in ingredient_ids if await self.ingredients.get(i) is None]
+        new_drugs = [d for d in await run_bounded(unknown, self.normalizer.ingredient, self.concurrency, "ingredients") if d]
         if new_concepts:
             await self.rx_concepts.upsert_many(new_concepts)
         if new_drugs:
-            await self.ingredients.upsert_many(list(new_drugs.values()))
+            await self.ingredients.upsert_many(new_drugs)
         return result
 
     async def _resolve_one(self, name: str, key_type: KeyType) -> NameMapping:
@@ -76,12 +103,11 @@ class IngredientResolver:
         wanted = unique(names)
         existing = await self.name_map.get_many(key_type, wanted)
         self.stats["names_cached"] += len(existing)
-        fresh: list[NameMapping] = []
-        for n in wanted:
-            if n not in existing:
-                m = await self._resolve_one(n, key_type)
-                fresh.append(m)
-                existing[n] = m
+        missing = [n for n in wanted if n not in existing]
+        fresh: list[NameMapping] = await run_bounded(
+            missing, lambda n: self._resolve_one(n, key_type), self.concurrency, f"names ({key_type.value})")
+        for n, m in zip(missing, fresh, strict=True):
+            existing[n] = m
         if fresh:
             await self.name_map.upsert_many(fresh)
         return {n: to_resolution(m) for n, m in existing.items()}

@@ -1,6 +1,5 @@
 """Reference adapters: every repository port implemented in memory. They define the behaviour the MongoDB adapters
 must reproduce (the conformance suite in tests/conformance runs the same assertions against every adapter)."""
-import difflib
 from collections import Counter
 
 from app.application.ports.excluded_term_repository import ExcludedTermRepository
@@ -29,6 +28,7 @@ from app.domain.entities.shortage import ShortageEvent, ShortageRecord
 from app.domain.entities.signal import SafetySignal
 from app.domain.entities.user import User
 from app.domain.exceptions import AlreadyExistsError
+from app.domain.services.name_search import best_matches, normalize_query
 from app.domain.value_objects.pair_counts import PairCounts
 
 
@@ -46,25 +46,11 @@ class MemoryIngredientRepository(IngredientRepository):
         return [self._d[r] for r in rxcuis if r in self._d]
 
     async def search(self, query, limit=10):
-        q = " ".join(query.upper().split())
+        q = normalize_query(query)
         if not q:
             return []
-        best: dict[str, tuple[float, str]] = {}
-        for drug in self._d.values():
-            for text in [drug.name, *drug.synonyms, *drug.brand_names]:
-                t = text.upper()
-                if t == q:
-                    score = 1.0
-                elif t.startswith(q) or q in t.split():
-                    score = 0.9
-                else:
-                    score = difflib.SequenceMatcher(None, q, t).ratio()
-                    if score < 0.75:
-                        continue
-                if drug.rxcui not in best or score > best[drug.rxcui][0]:
-                    best[drug.rxcui] = (score, text)
-        ranked = sorted(best.items(), key=lambda kv: (-kv[1][0], self._d[kv[0]].name))[:limit]
-        return [(self._d[rx], text, score) for rx, (score, text) in ranked]
+        candidates = ((d.rxcui, d.name, [d.name, *d.synonyms, *d.brand_names]) for d in self._d.values())
+        return [(self._d[rx], text, score) for rx, text, score in best_matches(q, candidates, limit)]
 
     async def list_by_class(self, class_id):
         return [d for d in self._d.values() if any(c.class_id == class_id for c in d.atc)]

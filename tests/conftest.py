@@ -5,6 +5,9 @@ import pytest
 
 # Tests never read the developer's .env secrets; a 32+ char key silences PyJWT's weak-key warning.
 os.environ.setdefault("JWT_SECRET", "test-secret-at-least-32-characters-long")
+# Tests never load the developer's real dataset (data/clean): fast, and the same result on every machine.
+os.environ["STORAGE_BACKEND"] = "memory"
+os.environ["DATA_DIR"] = "tests/.no-dataset"
 
 from app.application.services.alert_dispatcher import AlertDispatcher
 from app.application.services.ingredient_resolver import IngredientResolver

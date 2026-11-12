@@ -49,6 +49,11 @@ def test_label_match_levels():
     assert match_level("GASTROINTESTINAL HAEMORRHAGE", text) is LabelMatch.PARTIAL   # one significant word only
     assert match_level("Alopecia", text) is LabelMatch.NONE
     assert match_level("Rash", "") is LabelMatch.NONE
+    us_label = "Diarrhea, peripheral edema, dyspnea, anemia and gastrointestinal hemorrhage; tumor lysis."
+    for meddra in ("DIARRHOEA", "OEDEMA PERIPHERAL", "DYSPNOEA", "ANAEMIA", "GASTROINTESTINAL HAEMORRHAGE",
+                   "TUMOUR LYSIS"):
+        assert match_level(meddra, us_label) is not LabelMatch.NONE, meddra      # British vs US spelling
+    assert match_level("DIARRHOEA", us_label) is LabelMatch.FULL
 
 
 def test_find_label_gaps():
