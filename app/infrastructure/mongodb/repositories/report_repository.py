@@ -37,6 +37,10 @@ class MongoReportRepository(ReportRepository):
     async def delete(self, report_id):
         return (await self.col.delete_one({"_id": report_id})).deleted_count == 1
 
+    async def list(self, skip, limit):
+        cursor = self.col.find({}, sort=[("receive_date", -1), ("_id", -1)], skip=skip, limit=limit)
+        return [from_doc(AdverseReport, d, "report_id") async for d in cursor]
+
     async def delete_quarter(self, quarter):
         return (await self.col.delete_many({"quarter": quarter})).deleted_count
 

@@ -15,12 +15,15 @@ class MongoSignalRepository(SignalRepository):
     async def upsert_many(self, signals):
         return await replace_many(self.col, [to_doc(s, "signal_id") for s in signals])
 
-    async def search(self, quarter, ingredient_rxcui, reaction, min_reports, only_signals, only_emerging, skip, limit):
+    async def search(self, quarter, ingredient_rxcui, reaction, min_reports, only_signals, only_emerging, skip, limit,
+                     reaction_contains=None):
         query: dict = {"quarter": quarter, "a": {"$gte": min_reports}}
         if ingredient_rxcui is not None:
             query["ingredient_rxcui"] = ingredient_rxcui
         if reaction is not None:
             query["reaction_term"] = reaction
+        elif reaction_contains:
+            query["reaction_term"] = {"$regex": reaction_contains}   # within the quarter's index range
         if only_signals:
             query["is_signal"] = True
         if only_emerging:

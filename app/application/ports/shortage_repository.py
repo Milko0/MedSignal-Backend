@@ -13,6 +13,16 @@ class ShortageRepository(ABC):
         """Stores the new current set (records that left the list are removed)."""
 
     @abstractmethod
+    async def get(self, package_ndc: str) -> ShortageRecord | None: ...
+
+    @abstractmethod
+    async def upsert(self, record: ShortageRecord) -> None:
+        """Adds or replaces one current record (admin correction, FR-24)."""
+
+    @abstractmethod
+    async def delete(self, package_ndc: str) -> bool: ...
+
+    @abstractmethod
     async def add_events(self, events: list[ShortageEvent]) -> int: ...
 
     @abstractmethod

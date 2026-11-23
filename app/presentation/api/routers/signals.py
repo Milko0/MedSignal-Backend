@@ -24,7 +24,8 @@ QUARTER = Query(None, description="Calendar quarter of the receive date, `YYYYQn
                         "previous quarters. Paginated.")
 async def signals(quarter: str | None = QUARTER,
                   rxcui: str | None = Query(None, description="Only this ingredient", openapi_examples=RXCUI_EXAMPLES),
-                  reaction: str | None = Query(None, description="MedDRA preferred term, any case",
+                  reaction: str | None = Query(None, description="Text found anywhere in the MedDRA term, any case and either "
+                                                           "spelling: anemia finds IRON DEFICIENCY ANAEMIA",
                                                examples=["RHABDOMYOLYSIS"]),
                   min_reports: int = Query(20, ge=1, description="Minimum `a` (reports with drug and reaction)"),
                   only_signals: bool = True, page: PageRequest = Depends(pagination), uc=Depends(list_signals)):

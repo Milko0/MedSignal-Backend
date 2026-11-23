@@ -10,7 +10,10 @@ class SignalRepository(ABC):
 
     @abstractmethod
     async def search(self, quarter: str, ingredient_rxcui: str | None, reaction: str | None, min_reports: int,
-                     only_signals: bool, only_emerging: bool, skip: int, limit: int) -> tuple[list[SafetySignal], int]: ...
+                     only_signals: bool, only_emerging: bool, skip: int, limit: int,
+                     reaction_contains: str | None = None) -> tuple[list[SafetySignal], int]:
+        """reaction: exact term. reaction_contains: a regular expression found anywhere in the term
+        (built by domain reaction_search_pattern: case and British/American spelling tolerant)."""
 
     @abstractmethod
     async def previous_prrs(self, ingredient_rxcui: str, reaction: str, quarter: str, n: int = 4) -> list[float]: ...

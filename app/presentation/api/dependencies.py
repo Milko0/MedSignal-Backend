@@ -8,6 +8,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.application.container import Container
 from app.application.dtos.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, PageRequest
+from app.application.services.shortage_status_reader import ShortageStatusReader
+from app.application.use_cases.admin.crud_labels import CrudLabels
+from app.application.use_cases.admin.crud_reports import CrudReports
+from app.application.use_cases.admin.crud_shortages import CrudShortages
+from app.application.use_cases.admin.crud_users import CrudUsers
 from app.application.use_cases.admin.manage_excluded_terms import ManageExcludedTerms
 from app.application.use_cases.auth.login import Login
 from app.application.use_cases.auth.logout import Logout
@@ -101,8 +106,16 @@ def get_drug_360(c: Container = Depends(container)):
                       c.excluded_terms, c.clock)
 def get_reaction_trend(c: Container = Depends(container)): return GetReactionTrend(c.reports, c.excluded_terms)
 def get_label_gaps(c: Container = Depends(container)): return GetLabelGaps(c.reports, c.labels, c.excluded_terms)
-def list_signals(c: Container = Depends(container)): return ListSignals(c.signals, c.ingredients, c.reports)
-def emerging_signals(c: Container = Depends(container)): return EmergingSignals(c.signals, c.ingredients, c.reports)
+def _shortage_reader(c: Container) -> ShortageStatusReader:
+    return ShortageStatusReader(c.shortage_status, c.shortages, c.clock)
+
+
+def list_signals(c: Container = Depends(container)):
+    return ListSignals(c.signals, c.ingredients, c.reports, _shortage_reader(c))
+
+
+def emerging_signals(c: Container = Depends(container)):
+    return EmergingSignals(c.signals, c.ingredients, c.reports, _shortage_reader(c))
 def signal_reports(c: Container = Depends(container)): return SignalReportsUseCase(c.reports, c.ingredients)
 def statistics(c: Container = Depends(container)): return GetStatistics(c.reports)
 def recommend_alternatives(c: Container = Depends(container)):
@@ -120,3 +133,8 @@ def manage_profile(c: Container = Depends(container)): return ManageProfile(c.us
 def excluded_terms_uc(c: Container = Depends(container)): return ManageExcludedTerms(c.excluded_terms, c.clock)
 def ingestion_runs(c: Container = Depends(container)): return ListIngestionRuns(c.ingestion_runs)
 def reconcile(c: Container = Depends(container)): return Reconcile(c.ingredients, c.shortages, c.shortage_status, c.clock)
+def crud_reports(c: Container = Depends(container)): return CrudReports(c.reports)
+def crud_labels(c: Container = Depends(container)): return CrudLabels(c.labels)
+def crud_shortages(c: Container = Depends(container)): return CrudShortages(c.shortages, c.shortage_status)
+def crud_users(c: Container = Depends(container)):
+    return CrudUsers(c.users, ManageProfile(c.users, c.follows, c.alerts), c.clock)

@@ -72,6 +72,12 @@ class MongoLabelRepository(LabelRepository):
     async def count(self):
         return await self.col.count_documents({})
 
+    async def list(self, skip, limit):
+        return [from_doc(DrugLabel, d, "set_id") async for d in self.col.find({}, sort=[("_id", 1)], skip=skip, limit=limit)]
+
+    async def delete(self, set_id):
+        return (await self.col.delete_one({"_id": set_id})).deleted_count == 1
+
 
 def _map_id(key_type, normalized: str) -> str:
     return f"{key_type}|{normalized}"

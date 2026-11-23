@@ -20,6 +20,9 @@ class SignalRow(BaseModel):
     is_emerging: bool
     label_match: str   # FULL | PARTIAL | NONE
     trend: list[float] = Field(default_factory=list)
+    # FDA shortage list status of the drug: CURRENT | TO_BE_DISCONTINUED | RESOLVED, None = never listed
+    shortage_status: str | None = None
+    in_shortage: bool = False          # True when shortage_status is CURRENT
 
 
 class SignalList(PageMeta):

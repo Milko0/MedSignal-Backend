@@ -17,6 +17,7 @@ class ReportRepository(ABC):
     @abstractmethod
     async def delete(self, report_id: str) -> bool: ...
 
+
     @abstractmethod
     async def delete_quarter(self, quarter: str) -> int:
         """Deletes every report of the quarter (rolling window). Returns how many. Mongo: index {quarter: 1}."""
@@ -48,3 +49,7 @@ class ReportRepository(ABC):
     @abstractmethod
     async def match_coverage(self, quarter: str | None = None) -> float:
         """Share of reports with at least one resolved ingredient (suspect or concomitant)."""
+
+    @abstractmethod
+    async def list(self, skip: int, limit: int) -> "list[AdverseReport]":
+        """Newest received first (admin browsing, FR-22)."""

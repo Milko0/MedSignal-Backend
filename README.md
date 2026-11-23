@@ -115,7 +115,7 @@ MedSignal-Backend/
 │           │   └── admin/           # crud_factory, excluded_terms, ingestion, reconciliation
 │           ├── dependencies.py      # DI providers, get_current_user, require_role
 │           ├── error_handlers.py    # Domain exceptions to HTTP codes
-│           └── responses.py         # not_implemented() helper for 501 endpoints
+│           └── responses.py         # shared error responses and Swagger examples
 ├── tests/
 │   ├── fixtures/                    # raw.py (real-shaped source records), fakes.py
 │   ├── unit/                        # domain, transformers, pipeline, infrastructure,
@@ -417,7 +417,7 @@ The `virtual-lab` files are an untested template: confirm ports and networking w
 | In-memory reference adapters + JSONL dataset, conformance suite | Done |
 | External clients with retry and rate limit, RxNav disk cache | Done, tested with a mock transport; **not run against the live APIs** |
 | MongoDB adapters, aggregation pipelines, indexes, Redis stores, change-stream projector | Done; conformance suite on local MongoDB 8 + Redis 8. Projector unit-tested; needs a replica set to run |
-| Admin CRUD, ingestion triggers over HTTP | 501 stubs |
+| Admin CRUD (FR-22 to FR-25), ingestion triggers over HTTP (FR-19, FR-20, background jobs, 202) | Done, tested |
 | Compose files, `virtual-lab` template | Compose works locally; `virtual-lab` untested |
 | Run on the real raw data (size, match rates, signal sanity) | Done: 6 quarters, ~133k reports, ~350 MB clean |
 

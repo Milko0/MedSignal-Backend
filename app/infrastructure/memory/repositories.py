@@ -1,5 +1,6 @@
 """Reference adapters: every repository port implemented in memory. They define the behaviour the MongoDB adapters
 must reproduce (the conformance suite in tests/conformance runs the same assertions against every adapter)."""
+import re
 from collections import Counter
 
 from app.application.ports.excluded_term_repository import ExcludedTermRepository
@@ -136,6 +137,12 @@ class MemoryLabelRepository(LabelRepository):
     async def count(self):
         return len(self._d)
 
+    async def list(self, skip, limit):
+        return [self._d[k] for k in sorted(self._d)][skip:skip + limit]
+
+    async def delete(self, set_id):
+        return self._d.pop(set_id, None) is not None
+
 
 class MemoryShortageRepository(ShortageRepository):
     def __init__(self) -> None:
@@ -154,6 +161,15 @@ class MemoryShortageRepository(ShortageRepository):
     async def replace_current(self, records):
         self._current = {r.package_ndc: r for r in records}
         return len(records)
+
+    async def get(self, package_ndc):
+        return self._current.get(package_ndc)
+
+    async def upsert(self, record):
+        self._current[record.package_ndc] = record
+
+    async def delete(self, package_ndc):
+        return self._current.pop(package_ndc, None) is not None
 
     async def add_events(self, events):
         self._events.extend(events)
@@ -240,6 +256,10 @@ class MemoryReportRepository(ReportRepository):
 
     async def delete(self, report_id):
         return self._d.pop(report_id, None) is not None
+
+    async def list(self, skip, limit):
+        items = sorted(self._d.values(), key=lambda r: (r.receive_date, r.report_id), reverse=True)
+        return items[skip:skip + limit]
 
     async def count(self):
         return len(self._d)
@@ -355,8 +375,11 @@ class MemorySignalRepository(SignalRepository):
             self._d[s.signal_id] = s
         return len(signals)
 
-    async def search(self, quarter, ingredient_rxcui, reaction, min_reports, only_signals, only_emerging, skip, limit):
+    async def search(self, quarter, ingredient_rxcui, reaction, min_reports, only_signals, only_emerging, skip, limit,
+                     reaction_contains=None):
+        contains = re.compile(reaction_contains) if reaction_contains else None
         hits = [s for s in self._d.values() if s.quarter == quarter and s.a >= min_reports
+                and (contains is None or contains.search(s.reaction_term))
                 and (ingredient_rxcui is None or s.ingredient_rxcui == ingredient_rxcui)
                 and (reaction is None or s.reaction_term == reaction)
                 and (not only_signals or s.is_signal) and (not only_emerging or s.is_emerging)]

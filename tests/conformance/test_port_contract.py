@@ -107,6 +107,8 @@ async def test_signal_search_and_history(c):
     found, total = await c.signals.search("2026Q3", None, None, 1, True, False, 0, 10)
     assert total == 0                                                            # only_signals filters the third
     found, total = await c.signals.search("2026Q2", "1", "R", 20, True, False, 0, 10)
+    assert (await c.signals.search("2026Q2", None, None, 1, True, False, 0, 10, reaction_contains="^R$"))[1] == 1
+    assert (await c.signals.search("2026Q2", None, None, 1, True, False, 0, 10, reaction_contains="X"))[1] == 0
     assert total == 1 and found[0].prr == 3.0
     assert await c.signals.previous_prrs("1", "R", "2026Q3") == [2.0, 3.0] and await c.signals.trend("1", "R", 2) == [3.0, 4.0]
     assert await c.signals.latest_quarter() == "2026Q3" and await c.signals.signal_count("1", "2026Q1") == 1
@@ -184,3 +186,18 @@ async def test_revoked_tokens_expire(c):
     assert await c.revoked_tokens.is_revoked("j1") and not await c.revoked_tokens.is_revoked("j2")
     c.clock.set(NOW + timedelta(seconds=61))
     assert not await c.revoked_tokens.is_revoked("j1")                           # gone with the token's lifetime
+
+
+async def test_admin_browsing_and_single_record_changes(c):
+    rep = lambda i, day: transform_report(raw.faers(i, 1, [raw._drug("X", "1", None)], ["Nausea"]), {})
+    await c.reports.upsert_many([rep(1, 1), rep(2, 1)])
+    assert len(await c.reports.list(0, 10)) == 2 and len(await c.reports.list(1, 10)) == 1
+    from app.domain.entities.label import DrugLabel
+    await c.labels.upsert_many([DrugLabel(set_id="b"), DrugLabel(set_id="a")])
+    assert [lb.set_id for lb in await c.labels.list(0, 10)] == ["a", "b"]
+    assert await c.labels.delete("a") and not await c.labels.delete("a") and await c.labels.count() == 1
+    rec = ShortageRecord(package_ndc="p", status=ShortageStatus.CURRENT, ingredient_rxcuis=["1"])
+    await c.shortages.upsert(rec)
+    await c.shortages.upsert(rec.model_copy(update={"status": ShortageStatus.RESOLVED}))
+    assert (await c.shortages.get("p")).status is ShortageStatus.RESOLVED
+    assert await c.shortages.delete("p") and await c.shortages.get("p") is None

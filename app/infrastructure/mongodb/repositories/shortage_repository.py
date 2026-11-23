@@ -23,6 +23,16 @@ class MongoShortageRepository(ShortageRepository):
         await self.col.delete_many({"_id": {"$nin": ids}})          # records that left the FDA list
         return len(records)
 
+    async def get(self, package_ndc):
+        return self._load(await self.col.find_one({"_id": package_ndc}))
+
+    async def upsert(self, record):
+        doc = to_doc(record, "package_ndc")
+        await self.col.replace_one({"_id": doc["_id"]}, doc, upsert=True)
+
+    async def delete(self, package_ndc):
+        return (await self.col.delete_one({"_id": package_ndc})).deleted_count == 1
+
     async def add_events(self, events):
         if events:
             await self.events.insert_many([to_doc(e) for e in events], ordered=False)

@@ -42,6 +42,9 @@ def test_signals_carry_the_disclaimer_and_numbers(client):
     assert body["meta"]["disclaimer"] == DISCLAIMER
     row = body["data"]["items"][0]
     assert (row["a"], row["b"], row["c"], row["d"]) == (20, 20, 4, 156) and row["is_emerging"]
+    assert "shortage_status" in row and isinstance(row["in_shortage"], bool)
+    found = client.get(f"{P}/signals", params={"quarter": "2026Q2", "min_reports": 1, "reaction": "hemorrhage"}).json()
+    assert found["data"]["items"] and all("HAEMORRHAGE" in r["reaction"] for r in found["data"]["items"])
     assert body["data"]["match_coverage"] > 0.99
     gaps = client.get(f"{P}/drugs/{IBU}/label-gaps").json()
     assert gaps["meta"]["disclaimer"] == DISCLAIMER and gaps["data"]["gaps"][0]["match_level"] == "PARTIAL"
@@ -93,7 +96,7 @@ def test_profile_and_admin_roles(client, world):
     assert client.delete(f"{P}/admin/excluded-terms/product use issue", headers=admin).status_code == 204
     runs = client.get(f"{P}/admin/ingestion/runs", headers=admin).json()
     assert {r["type"] for r in runs} >= {"FULL_LOAD", "SHORTAGE_POLL", "INCREMENTAL"} and runs[0]["stats"] is not None
-    assert client.get(f"{P}/admin/reports", headers=admin).status_code == 501              # CRUD still a stub
+    assert client.get(f"{P}/admin/reports", headers=admin).status_code == 200
     assert client.post(f"{P}/admin/reconciliation", headers=admin).json()["ingredients_checked"] >= 1
     assert client.delete(f"{P}/profile", headers=h).status_code == 204
 

@@ -42,6 +42,7 @@ to `_id` (`mongodb/documents.py`), read back with `Model.model_validate`. Dates 
 | `RecallRepository.find_by_ingredient(accepted_only=True)` | Only `link.status == ACCEPTED`. `linked_share` = accepted / all recalls. |
 | `AlertStore.add` | Idempotent on `(user_id, alert_id)`; returns `False` if a live alert exists; an expired id may be created again. TTL 30 days. |
 | `CounterStore.set_count` | Overwrite, never increment. |
+| `ReportRepository.list` / `LabelRepository.list, delete` / `ShortageRepository.get, upsert, delete` | Admin CRUD (FR-22 to FR-24): reports newest received first (`receive_date` desc, then id desc), labels by set id; `upsert` replaces one current shortage record; deletes return whether something was removed. |
 | `ReportRepository.delete_quarter` / `SignalRepository.delete_quarter` | Rolling window (`ApplyRetentionWindow`): delete every document of the quarter, return how many (Mongo: `delete_many({quarter: q})` on the `{quarter: 1}` index). |
 | `RevokedTokenStore` | Logout. `revoke(jti, ttl)` is idempotent; the entry expires with the token (Redis `SET revoked:{jti} 1 EX ttl`). |
 | `ShortageStatusStore` | Holds `ShortageSummary` per **ingredient**; TTL is a cache TTL (the value can always be rebuilt). |

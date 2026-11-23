@@ -17,3 +17,10 @@ class LabelRepository(ABC):
 
     @abstractmethod
     async def count(self) -> int: ...
+
+    @abstractmethod
+    async def list(self, skip: int, limit: int) -> list[DrugLabel]:
+        """Ordered by set id (admin browsing, FR-23)."""
+
+    @abstractmethod
+    async def delete(self, set_id: str) -> bool: ...

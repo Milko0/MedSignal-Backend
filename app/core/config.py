@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     storage_backend: str = "memory"
     data_dir: str = "data/clean"
     cache_dir: str = "data/cache"
+    faers_dir: str = "data/faers"          # FAERS bulk files an admin may load over HTTP (FR-19)
     # Rolling window of FAERS quarters kept in the dataset (the oldest is dropped when a new one is loaded)
     faers_window_quarters: int = 4
 

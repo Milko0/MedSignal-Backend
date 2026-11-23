@@ -1,5 +1,4 @@
 """Shared OpenAPI pieces: the error body and the error responses each kind of route can return."""
-from fastapi import HTTPException
 from pydantic import BaseModel
 
 
@@ -26,8 +25,3 @@ ADMIN = {**UNAUTHORIZED, **FORBIDDEN}
 RXCUI_EXAMPLES = {"semaglutide": {"value": "1991302"}, "atorvastatin": {"value": "83367"},
                   "ibuprofen": {"value": "5640"}}
 QUARTER_EXAMPLE = {"latest": {"value": "2026Q3"}, "older": {"value": "2025Q4"}}
-
-
-def not_implemented(detail: str = "Not implemented yet") -> None:
-    """Placeholder for endpoints that are designed (Swagger) but not built yet."""
-    raise HTTPException(status_code=501, detail=detail)

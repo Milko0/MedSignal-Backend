@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.core.constants import API_PREFIX, DISCLAIMER
 from app.infrastructure.container_factory import build_container
+from app.infrastructure.ingestion_jobs import IngestionJobs
 from app.presentation.api.error_handlers import register_error_handlers
 from app.presentation.api.router import api_router
 
@@ -46,12 +47,13 @@ TAGS = [
     {"name": "Shortages", "description": "Alternatives for a drug in shortage (FR-10). Open to guests."},
     {"name": "My medicines", "description": "Followed drugs and their alerts (FR-15 to FR-18). **User token.**"},
     {"name": "Profile", "description": "Account, password and alert settings (FR-13, FR-14). **User token.**"},
-    {"name": "Admin: ingestion", "description": "Ingestion logs and triggers (FR-19 to FR-21). **Admin token.**"},
+    {"name": "Admin: ingestion", "description": "Start a FAERS load or an incremental update in the background, and "
+                                                "read the ingestion logs (FR-19 to FR-21). **Admin token.**"},
     {"name": "Admin: excluded terms", "description": "Non-specific reaction terms left out of the counts (FR-26). "
                                                      "**Admin token.**"},
     {"name": "Admin: reconciliation", "description": "Rebuild the Redis live values from the documents (FR-27). "
                                                      "**Admin token.**"},
-    *({"name": f"Admin: {n}", "description": f"CRUD of {n} ({fr}). **Admin token.** Not implemented yet (501)."}
+    *({"name": f"Admin: {n}", "description": f"CRUD of {n} ({fr}). **Admin token.**"}
       for n, fr in (("reports", "FR-22"), ("labels", "FR-23"), ("shortages", "FR-24"), ("users", "FR-25"))),
 ]
 
@@ -60,6 +62,7 @@ TAGS = [
 async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.container = await build_container(settings)
+    app.state.ingestion_jobs = IngestionJobs(app.state.container, settings)   # FR-19, FR-20 over HTTP
     log.info("Storage backend: %s", settings.storage_backend)
     yield
 
