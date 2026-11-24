@@ -129,10 +129,11 @@ MedSignal-Backend/
 │   ├── build_clean_dataset.py       # raw -> data/clean/*.jsonl (+ build report)
 │   ├── refresh_dataset.py           # brand names + missing labels + signals, without a rebuild
 │   ├── seed_databases.py            # data/clean -> MongoDB (through the ports)
+│   ├── check_cluster.py             # end-to-end test of the Docker cluster: alerts, replays, MongoDB and Redis failover
 │   ├── benchmark_indexes.py         # explain() before/after indexes
 │   └── medsignal_api_check.py       # live API sanity checks
 ├── deploy/
-│   ├── docker-compose.local.yml     # MongoDB x3, Redis x3, Sentinels (+ `app` profile)
+│   ├── docker-compose.local.yml     # MongoDB x3, Redis x3, Sentinels (+ `seed` and `app` profiles)
 │   ├── mongo/init-replica.sh
 │   ├── redis/sentinel.conf
 │   └── virtual-lab/                 # docker-compose.node.yml, init-replica-lab.sh
@@ -305,36 +306,74 @@ Copy `.env.example` to `.env`.
 
 ## 9. Run and test
 
+First time: create the virtual environment, install, and create `.env`. On Windows use the `.venv` Python (the
+system `py` may lack packages such as `ijson`). Get the dataset by unzipping the shared `data/clean` (see "Sharing the
+dataset" below) or by building it.
+
 ```bash
-python -m venv .venv && . .venv/bin/activate        # Windows: .venv\Scripts\activate
+python -m venv .venv
+.venv\Scripts\activate            # macOS / Linux: . .venv/bin/activate
 pip install -r requirements-dev.txt
-cp .env.example .env
-python -m pytest                                    # no network and no databases needed
-uvicorn app.main:app --reload                       # http://localhost:8000/docs  (empty until data/clean exists)
-python -m app.worker                                # second terminal: daily shortage poll
+cp .env.example .env               # Windows: copy .env.example .env
+python -m pytest                   # unit + API tests; the MongoDB/Redis part runs only when both are reachable
 ```
 
-**With MongoDB + Redis** (`STORAGE_BACKEND=databases`). Any local MongoDB and Redis work, for example a MongoDB
-service and `docker run -d --name redis -p 6379:6379 redis`, or the full cluster:
+There are three ways to run the backend. The API is always at http://localhost:8000/docs (Swagger) unless noted.
+
+**A. Memory (quickest, no databases).** `STORAGE_BACKEND=memory` in `.env`. The dataset in `DATA_DIR` is loaded into
+RAM (about 20 s, 1.8 GB). Accounts, follows and alerts are lost on every restart, and `--reload` restarts on every
+code change, so register again after editing the backend.
 
 ```bash
-docker compose -f deploy/docker-compose.local.yml up -d     # MongoDB x3 (replica set), Redis x3, Sentinels
+uvicorn app.main:app --reload
 ```
 
-Then, once, load the dataset (a few minutes; indexes are created automatically), and start the API and worker with
-`STORAGE_BACKEND=databases` in `.env`:
+**B. Single MongoDB + single Redis (everyday development, data persists).** A local MongoDB (for example the Windows
+service on port 27017) and one Redis (`docker run -d --name redis -p 6379:6379 redis`, later `docker start redis`).
+Set `STORAGE_BACKEND=databases`, load the dataset once, then start the API (and the worker in a second terminal):
 
 ```bash
-python scripts/seed_databases.py --drop                    # data/clean -> MongoDB
-uvicorn app.main:app --reload                              # starts in about a second, no dataset in RAM
-python -m app.worker                                       # change-stream projector (replica set) or Reconcile
+python scripts/seed_databases.py --drop      # data/clean -> MongoDB, ~2 min; keeps users; indexes created automatically
+uvicorn app.main:app --reload                # starts in about a second
+python -m app.worker                         # daily shortage poll; Reconcile every 10 min (a single mongod has no change streams)
 ```
 
-`pytest` also runs the conformance suite against the local MongoDB and Redis when they are reachable (test database
-`medsignal_test`, Redis db 15; never the real data), and skips that part otherwise.
+**C. The replicated cluster in Docker (what the course asks for; everything persists).** MongoDB replica set of 3,
+Redis primary + 2 replicas + 3 Sentinels, the API, the worker (change-stream projector) and the frontend behind Nginx.
+Start Docker Desktop, then from this folder:
 
-Everything in containers (databases, API, worker, frontend at http://localhost:8080):
-`docker compose -f deploy/docker-compose.local.yml --profile app up -d --build`.
+```bash
+docker compose -f deploy/docker-compose.local.yml up -d                          # databases, replica set initiated automatically
+docker compose -f deploy/docker-compose.local.yml --profile seed run --rm seed     # load data/clean once (~2 min)
+docker compose -f deploy/docker-compose.local.yml --profile app up -d --build      # API, worker, frontend
+```
+
+| Service | Address on the host |
+|---|---|
+| Frontend (Nginx, proxies `/api/`) | http://localhost:8080 |
+| API / Swagger | http://localhost:8001/docs |
+| MongoDB members | `localhost:27117`, `27118`, `27119` (inside Docker: `mongo1..3:27017`, replica set `rs0`) |
+| Redis primary / replicas | `localhost:6479` / `6480`, `6481`; Sentinels `26479`-`26481` |
+
+The host ports are shifted on purpose, so the cluster runs next to a local MongoDB, Redis and dev API. Useful checks:
+
+```bash
+docker compose -f deploy/docker-compose.local.yml exec mongo1 mongosh --quiet --eval "rs.status().members.map(m => m.name + ' ' + m.stateStr)"
+docker compose -f deploy/docker-compose.local.yml exec redis-primary redis-cli INFO replication
+docker compose -f deploy/docker-compose.local.yml logs -f worker        # "Change-stream projector watching ..."
+docker compose -f deploy/docker-compose.local.yml --profile app down    # stop everything (data volumes are kept)
+```
+
+**Prove the cluster works** (about 2 minutes; stops and restarts the primaries itself): `python scripts/check_cluster.py`.
+It registers a user and follows a drug through the frontend's Nginx, changes a signal in MongoDB and waits for the
+worker's "new signal" alert in Redis, replays the change (still one alert), stops the MongoDB primary (a secondary
+is elected and the API keeps writing), stops the Redis primary (Sentinel promotes a replica and the API keeps writing)
+and restarts the worker (it resumes from the saved change-stream token). Every step prints what it saw.
+
+The frontend for options A and B runs with `npm run dev` in `MedSignal-Frontend` (http://localhost:5173).
+
+`pytest` also runs the conformance suite against the local MongoDB and Redis of option B when they are reachable (test
+database `medsignal_test`, Redis db 15; never the real data), and skips that part otherwise.
 
 **Build the real dataset.** Needs network the first time; RxNav answers are cached in `CACHE_DIR`:
 
@@ -416,9 +455,10 @@ The `virtual-lab` files are an untested template: confirm ports and networking w
 | Ingestion use cases: FAERS load, shortage poll with history and alerts, labels and recalls update, signal computation, dataset builder | Done, tested with fakes |
 | In-memory reference adapters + JSONL dataset, conformance suite | Done |
 | External clients with retry and rate limit, RxNav disk cache | Done, tested with a mock transport; **not run against the live APIs** |
-| MongoDB adapters, aggregation pipelines, indexes, Redis stores, change-stream projector | Done; conformance suite on local MongoDB 8 + Redis 8. Projector unit-tested; needs a replica set to run |
+| MongoDB adapters, aggregation pipelines, indexes, Redis stores, change-stream projector | Done; conformance suite on MongoDB 8 + Redis 8; projector running on the replica set (signal alerts, live counters, resume token) |
 | Admin CRUD (FR-22 to FR-25), ingestion triggers over HTTP (FR-19, FR-20, background jobs, 202) | Done, tested |
-| Compose files, `virtual-lab` template | Compose works locally; `virtual-lab` untested |
+| Local replicated cluster (compose) | Tested end to end with `scripts/check_cluster.py`: app through Nginx, seed through the replica set (both secondaries hold every document), a MongoDB change creating a signal alert in under a second, replay creating no duplicate, MongoDB primary stopped (new primary in 10-20 s, API keeps writing), Redis primary stopped (Sentinel promotes a replica in about 8 s, API keeps writing), worker resuming from its token |
+| `virtual-lab` template | Not run on the lab VMs yet |
 | Run on the real raw data (size, match rates, signal sanity) | Done: 6 quarters, ~133k reports, ~350 MB clean |
 
 Open questions: the UNII -> RxCUI lookup route of RxNav (client method exists, marked unverified), the exact RxNav behaviour for
