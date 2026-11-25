@@ -10,7 +10,7 @@ from app.core.config import Settings
 from app.domain.entities.excluded_term import ExcludedTerm
 from app.infrastructure.clock import SystemClock
 from app.infrastructure.memory.factory import DEFAULT_EXCLUDED_TERMS
-from app.infrastructure.mongodb.client import create_mongo_client
+from app.infrastructure.mongodb.client import analytics_database, create_mongo_client
 from app.infrastructure.mongodb.indexes import ensure_indexes
 from app.infrastructure.mongodb.repositories.catalog_repositories import (
     MongoLabelRepository,
@@ -36,14 +36,16 @@ from app.infrastructure.redis.stores.shortage_status_store import RedisShortageS
 log = logging.getLogger("medsignal.storage")
 
 
-def create_database_container(db, redis, clock=None) -> Container:
-    """Wires the adapters around an open database handle and Redis client (used by the app and by the tests)."""
+def create_database_container(db, redis, clock=None, read_db=None) -> Container:
+    """Wires the adapters around an open database handle and Redis client (used by the app and by the tests).
+    `read_db` is the same database opened with a secondary read preference; reports and signals use it for their
+    analytics queries (None: everything reads the primary)."""
     clock = clock or SystemClock()
     return Container(
         ingredients=MongoIngredientRepository(db), rx_concepts=MongoRxConceptRepository(db),
         products=MongoProductRepository(db), labels=MongoLabelRepository(db), shortages=MongoShortageRepository(db),
-        recalls=MongoRecallRepository(db), name_map=MongoNameMapRepository(db), reports=MongoReportRepository(db),
-        signals=MongoSignalRepository(db), users=MongoUserRepository(db),
+        recalls=MongoRecallRepository(db), name_map=MongoNameMapRepository(db), reports=MongoReportRepository(db, read_db),
+        signals=MongoSignalRepository(db, read_db), users=MongoUserRepository(db),
         excluded_terms=MongoExcludedTermRepository(db), ingestion_runs=MongoIngestionRunRepository(db),
         shortage_status=RedisShortageStatusStore(redis), follows=RedisFollowStore(redis),
         alerts=RedisAlertStore(redis, clock), counters=RedisCounterStore(redis),
@@ -63,7 +65,7 @@ async def build_database_container(settings: Settings, clock=None) -> Container:
                            f"{settings.redis_url or settings.redis_sentinels}): {exc}") from exc
     db = mongo[settings.mongo_db]
     await ensure_indexes(db)
-    c = create_database_container(db, redis, clock)
+    c = create_database_container(db, redis, clock, analytics_database(db, settings))
     if not await c.excluded_terms.list():
         for t in DEFAULT_EXCLUDED_TERMS:
             await c.excluded_terms.add(ExcludedTerm(term=t, added_at=c.clock.now()))

@@ -26,6 +26,9 @@ class Settings(BaseSettings):
 
     mongo_uri: str = "mongodb://localhost:27017/?directConnection=true"
     mongo_db: str = "medsignal"
+    # Analytics reads (statistics, signal explorer, trends) go to secondaries; accounts and batch jobs use the primary
+    mongo_read_secondaries: bool = True
+    mongo_max_staleness_seconds: int = 90      # MongoDB rejects values below 90
     redis_url: str = "redis://localhost:6379/0"
     redis_sentinels: str = ""
     redis_master_name: str = "mymaster"

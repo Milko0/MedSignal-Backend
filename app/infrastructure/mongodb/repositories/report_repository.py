@@ -19,10 +19,17 @@ def _drug_field(role_filter: RoleFilter) -> str:
 
 
 class MongoReportRepository(ReportRepository):
-    """Collection `reports`, `_id` = report_id. See mongodb/indexes.py for the indexes each query uses."""
+    """Collection `reports`, `_id` = report_id. See mongodb/indexes.py for the indexes each query uses.
 
-    def __init__(self, db) -> None:
+    `self.col` is the primary handle: writes, `get`, and every read that ingestion or a batch job must see right after
+    its own write (`pair_counts`, `match_coverage`, `quarters`, `count`). `self.read` is the analytics handle
+    (secondaries when `read_db` is given): the queries behind statistics, Drug 360 and the signal drawer, where a
+    result a few seconds old is fine.
+    """
+
+    def __init__(self, db, read_db=None) -> None:
         self.col = db["reports"]
+        self.read = (read_db if read_db is not None else db)["reports"]
 
     async def upsert_many(self, reports):
         # The filter only matches an older or equal version. A newer stored version makes the upsert try an insert
@@ -50,8 +57,8 @@ class MongoReportRepository(ReportRepository):
     async def quarters(self):
         return sorted(await self.col.distinct("quarter"))
 
-    async def _rows(self, pipeline):
-        return [row async for row in await self.col.aggregate(pipeline, allowDiskUse=True)]
+    async def _rows(self, pipeline, col=None):
+        return [row async for row in await (col or self.col).aggregate(pipeline, allowDiskUse=True)]
 
     async def pair_counts(self, quarter, role_filter, excluded_terms):
         field, excluded = _drug_field(role_filter), sorted(excluded_terms)
@@ -64,13 +71,13 @@ class MongoReportRepository(ReportRepository):
 
     async def top_reactions(self, ingredient_rxcui, limit, role_filter, excluded_terms):
         rows = await self._rows(p.top_reactions(ingredient_rxcui, _drug_field(role_filter), sorted(excluded_terms),
-                                                limit))
+                                                limit), self.read)
         return [(r["_id"], r["n"]) for r in rows]
 
     async def monthly_trend(self, ingredient_rxcui, reactions, months):
         if not reactions:
             return []
-        latest = await self.col.find_one({"suspect_ingredient_ids": ingredient_rxcui},
+        latest = await self.read.find_one({"suspect_ingredient_ids": ingredient_rxcui},
                                          {"receive_date": 1}, sort=[("receive_date", -1)])
         if latest is None:
             return []
@@ -81,19 +88,19 @@ class MongoReportRepository(ReportRepository):
             window.append(f"{y:04d}-{m:02d}")
             y, m = (y - 1, 12) if m == 1 else (y, m - 1)
         window.reverse()
-        rows = await self._rows(p.monthly_trend(ingredient_rxcui, reactions, f"{window[0]}-01"))
+        rows = await self._rows(p.monthly_trend(ingredient_rxcui, reactions, f"{window[0]}-01"), self.read)
         counts = {(r["_id"]["m"], r["_id"]["r"]): r["n"] for r in rows}
         return [(mo, t, counts.get((mo, t), 0)) for mo in window for t in reactions]
 
     async def list_for_pair(self, ingredient_rxcui, reaction, skip, limit):
         query = {"suspect_ingredient_ids": ingredient_rxcui, "reaction_pts": reaction}
-        cursor = self.col.find(query, sort=[("receive_date", -1), ("_id", -1)], skip=skip, limit=limit)
+        cursor = self.read.find(query, sort=[("receive_date", -1), ("_id", -1)], skip=skip, limit=limit)
         items = [from_doc(AdverseReport, d, "report_id") async for d in cursor]
-        return items, await self.col.count_documents(query)
+        return items, await self.read.count_documents(query)
 
     async def statistics(self, group_by, ingredient_rxcui, quarter):
         counts: dict[str, int] = {}
-        for row in await self._rows(stats_by_group(group_by, ingredient_rxcui, quarter)):
+        for row in await self._rows(stats_by_group(group_by, ingredient_rxcui, quarter), self.read):
             key = row["_id"]
             if group_by == "seriousness":
                 key = _SERIOUS.get(key, "UNKNOWN")
