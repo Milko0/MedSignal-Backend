@@ -5,8 +5,9 @@ RxNav, bulk files) and keeps one job of each kind at a time. Every run writes it
 a job that crashes writes one with the error, so the admin always sees what happened in GET /admin/ingestion/runs.
 """
 import logging
+import re
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app.application.container import Container
@@ -21,6 +22,8 @@ from app.core.config import Settings
 from app.domain.entities.enums import RunType
 from app.domain.entities.ingestion_run import IngestionRun
 from app.domain.exceptions import ValidationRuleError
+from app.domain.services.retention_window import quarters_to_drop
+from app.domain.value_objects.quarter import Quarter
 from app.infrastructure.external.file_feeds import FileFeeds
 from app.infrastructure.external.http import HttpFetcher
 from app.infrastructure.external.openfda_client import OpenFdaFeeds
@@ -32,6 +35,7 @@ log = logging.getLogger("medsignal.ingestion")
 FAERS = "faers"
 INCREMENTAL = "incremental"
 LABELS = "labels"
+_QUARTER_IN_NAME = re.compile(r"^(\d{4})q([1-4])-", re.IGNORECASE)
 
 
 class IngestionJobs:
@@ -61,6 +65,37 @@ class IngestionJobs:
                 raise ValidationRuleError(f"{name} is not in {self.s.faers_dir}")
             paths.append(str(path))
         return paths
+
+    async def faers_files(self) -> list[dict]:
+        """The bulk files in FAERS_DIR (what download_faers.py left there), newest quarter first."""
+        base = Path(self.s.faers_dir)
+        if not base.is_dir():
+            return []
+        loaded = set(await self.c.reports.quarters())
+        files = []
+        for f in base.iterdir():
+            if not f.is_file() or f.name.endswith(".part"):
+                continue
+            m = _QUARTER_IN_NAME.match(f.name)
+            quarter = f"{m.group(1)}Q{m.group(2)}" if m else None
+            st = f.stat()
+            files.append({"name": f.name, "quarter": quarter, "size_mb": round(st.st_size / 1e6, 1),
+                          "modified_at": datetime.fromtimestamp(st.st_mtime, UTC).isoformat(),
+                          "quarter_loaded": quarter in loaded})
+        return sorted(files, key=lambda x: (x["quarter"] or "", x["name"]), reverse=True)
+
+    async def loaded_quarters(self, adding: str | None = None) -> dict:
+        """The quarters in the database and, for `adding`, which ones a load would drop from the rolling window."""
+        present = await self.c.reports.quarters()
+        keep = self.s.faers_window_quarters
+        out = {"window_quarters": keep, "quarters": present, "adding": None, "would_drop": []}
+        if adding:
+            if not re.fullmatch(r"\d{4}Q[1-4]", adding.strip(), re.IGNORECASE):
+                raise ValidationRuleError(f"Not a quarter: {adding} (use e.g. 2026Q4)")
+            q = str(Quarter.parse(adding.strip()))
+            out["adding"] = q
+            out["would_drop"] = quarters_to_drop(sorted({*present, q}), keep)
+        return out
 
     # ------------------------------------------------------------------ jobs
     def start(self, kind: str) -> bool:

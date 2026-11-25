@@ -49,6 +49,26 @@ class IngestionStarted(BaseModel):
     detail: str
 
 
+class FaersFileDto(BaseModel):
+    """A FAERS bulk file waiting in the FAERS folder, ready for POST /admin/ingestion/faers."""
+
+    name: str
+    quarter: str | None = Field(description="Quarter read from the file name (e.g. 2026Q3); null if not recognised")
+    size_mb: float
+    modified_at: str
+    quarter_loaded: bool = Field(description="True when reports of this quarter are already in the database")
+
+
+class LoadedQuartersDto(BaseModel):
+    """The rolling FAERS window as it is now, and what a load would change."""
+
+    window_quarters: int = Field(description="Quarters kept after every load (FAERS_WINDOW_QUARTERS)")
+    quarters: list[str] = Field(description="Quarters with reports in the database, oldest first")
+    adding: str | None = Field(default=None, description="The quarter passed in ?adding=, normalised")
+    would_drop: list[str] = Field(default_factory=list,
+                                  description="Quarters a load of `adding` would remove from the database")
+
+
 class FaersLoadRequest(BaseModel):
     files: list[str] = Field(min_length=1, description="FAERS bulk file names inside the FAERS folder (data/faers), "
                                                        "e.g. 2026q3-drug-event-0001-of-0031.json.zip")

@@ -1,6 +1,12 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 
-from app.application.dtos.admin import FaersLoadRequest, IngestionRunDto, IngestionStarted
+from app.application.dtos.admin import (
+    FaersFileDto,
+    FaersLoadRequest,
+    IngestionRunDto,
+    IngestionStarted,
+    LoadedQuartersDto,
+)
 from app.presentation.api.dependencies import ingestion_runs
 from app.presentation.api.responses import CONFLICT
 
@@ -46,6 +52,23 @@ async def incremental(background: BackgroundTasks,
         raise HTTPException(status.HTTP_409_CONFLICT, BUSY)
     background.add_task(j.incremental, label_limit, since_days)
     return IngestionStarted(job="incremental", detail="Polling openFDA; see /api/admin/ingestion/runs")
+
+
+@router.get("/faers-files", response_model=list[FaersFileDto], summary="FAERS files ready to load (FR-19)",
+            description="The bulk files in `FAERS_DIR`, newest quarter first, as downloaded by "
+                        "`scripts/download_faers.py`. Use their `name` in `POST /admin/ingestion/faers`. "
+                        "`quarter_loaded` tells whether that quarter is already in the database.")
+async def faers_files(j=Depends(jobs)):
+    return await j.faers_files()
+
+
+@router.get("/quarters", response_model=LoadedQuartersDto, summary="Loaded FAERS quarters (rolling window)",
+            description="The quarters with reports in the database, oldest first, and the window size. With "
+                        "`?adding=2026Q4` it also says which quarters loading that quarter would drop.",
+            responses={422: {"description": "`adding` is not a quarter"}})
+async def quarters(adding: str | None = Query(None, description="A quarter to preview, e.g. 2026Q4"),
+                   j=Depends(jobs)):
+    return await j.loaded_quarters(adding)
 
 
 @router.get("/runs", response_model=list[IngestionRunDto], summary="Ingestion logs (FR-21)",

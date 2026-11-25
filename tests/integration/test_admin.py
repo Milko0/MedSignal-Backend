@@ -139,6 +139,30 @@ def test_ingestion_triggers_start_in_the_background(setup):
     assert jobs.calls[0] == ("incremental", 50, 3) and jobs.calls[1][0] == "faers" and jobs.calls[1][2] is None
 
 
+def test_faers_files_lists_the_downloaded_files(setup):
+    client, admin, _, world = setup
+    files = client.get(f"{P}/ingestion/faers-files", headers=admin).json()
+    assert [f["name"] for f in files] == ["2026q3-drug-event-0001-of-0031.json.zip"]
+    loaded = asyncio.run(world.reports.quarters())
+    assert files[0]["quarter"] == "2026Q3" and files[0]["quarter_loaded"] == ("2026Q3" in loaded)
+    assert client.get(f"{P}/ingestion/faers-files").status_code == 401
+
+
+def test_quarters_shows_the_window_and_what_a_load_would_drop(setup):
+    client, admin, jobs, world = setup
+    present = asyncio.run(world.reports.quarters())
+    body = client.get(f"{P}/ingestion/quarters", headers=admin).json()
+    assert body["quarters"] == present and body["window_quarters"] == jobs.s.faers_window_quarters
+    newest = present[-1]
+    year, q = int(newest[:4]), int(newest[-1])
+    nxt = f"{year + q // 4}q{q % 4 + 1}"                                   # lower case is accepted
+    preview = client.get(f"{P}/ingestion/quarters", headers=admin, params={"adding": nxt}).json()
+    assert preview["adding"] == nxt.upper()
+    expected = len(present) + 1 - jobs.s.faers_window_quarters
+    assert preview["would_drop"] == present[:max(expected, 0)]
+    assert client.get(f"{P}/ingestion/quarters", headers=admin, params={"adding": "2026Q5"}).status_code == 422
+
+
 def test_faers_trigger_rejects_paths_and_missing_files(setup):
     client, admin, jobs, _ = setup
     for name in ("../secret.txt", "missing.json.zip"):
