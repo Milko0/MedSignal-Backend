@@ -1,21 +1,43 @@
-# Local cluster: MongoDB replica set x3, Redis primary + 2 replicas + 3 Sentinels.
-#   docker compose -f deploy/docker-compose.local.yml up -d            -> databases only
-#   docker compose -f deploy/docker-compose.local.yml --profile app up -d --build   -> + api, worker, frontend
+# Local cluster: MongoDB replica set x3, Redis primary + 2 replicas + 3 Sentinels (+ API, worker, frontend).
+#
+#   docker compose -f deploy/docker-compose.local.yml up -d                    databases only
+#   docker compose -f deploy/docker-compose.local.yml --profile seed run --rm seed     load data/clean once (~2 min)
+#   docker compose -f deploy/docker-compose.local.yml --profile app up -d --build      + API, worker, frontend
+#
+# Inside the network the services use the real ports and the replica-set / Sentinel addresses. On the host the
+# ports are shifted (MongoDB 27117-27119, Redis 6479-6481, Sentinels 26479-26481, API 8001, frontend 8080) so the
+# cluster can run next to a local MongoDB / Redis / dev API on the default ports.
+x-app-env: &app-env
+  STORAGE_BACKEND: databases
+  MONGO_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0
+  MONGO_DB: medsignal
+  REDIS_SENTINELS: sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
+  REDIS_MASTER_NAME: mymaster
+  JWT_SECRET: change-me-in-real-env-change-me-in-real-env
+  CORS_ORIGINS: http://localhost:8080
+  FAERS_WINDOW_QUARTERS: "6"
+
+x-app-depends: &app-depends
+  mongo-init: { condition: service_completed_successfully }
+  sentinel-1: { condition: service_started }
+  sentinel-2: { condition: service_started }
+  sentinel-3: { condition: service_started }
+
 services:
   mongo1:
     image: mongo:7
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
-    ports: ["27017:27017"]
+    ports: ["27117:27017"]
     volumes: ["mongo1-data:/data/db"]
   mongo2:
     image: mongo:7
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
-    ports: ["27018:27017"]
+    ports: ["27118:27017"]
     volumes: ["mongo2-data:/data/db"]
   mongo3:
     image: mongo:7
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
-    ports: ["27019:27017"]
+    ports: ["27119:27017"]
     volumes: ["mongo3-data:/data/db"]
   mongo-init:
     image: mongo:7
@@ -24,57 +46,76 @@ services:
     entrypoint: ["sh", "/init.sh"]
     restart: "no"
 
+  # Redis nodes and Sentinels have fixed addresses: Sentinel monitors the primary by IP, because a stopped container's
+  # name no longer resolves in Docker's DNS and the failed lookups would keep Sentinel in TILT mode (no failover).
   redis-primary:
     image: redis:7
     command: redis-server --appendonly yes
-    ports: ["6379:6379"]
+    ports: ["6479:6379"]
     volumes: ["redis-primary-data:/data"]
+    networks: { default: { ipv4_address: 172.29.0.10 } }
   redis-replica-1:
     image: redis:7
-    command: redis-server --appendonly yes --replicaof redis-primary 6379
-    ports: ["6380:6379"]
+    command: redis-server --appendonly yes --replicaof 172.29.0.10 6379
+    ports: ["6480:6379"]
     depends_on: [redis-primary]
+    networks: { default: { ipv4_address: 172.29.0.11 } }
   redis-replica-2:
     image: redis:7
-    command: redis-server --appendonly yes --replicaof redis-primary 6379
-    ports: ["6381:6379"]
+    command: redis-server --appendonly yes --replicaof 172.29.0.10 6379
+    ports: ["6481:6379"]
     depends_on: [redis-primary]
+    networks: { default: { ipv4_address: 172.29.0.12 } }
   sentinel-1: &sentinel
     image: redis:7
     volumes: ["./redis/sentinel.conf:/etc/sentinel/sentinel.conf:ro"]
     command: ["sh", "-c", "cp /etc/sentinel/sentinel.conf /tmp/sentinel.conf && redis-sentinel /tmp/sentinel.conf"]
-    ports: ["26379:26379"]
+    ports: ["26479:26379"]
     depends_on: [redis-primary]
+    networks: { default: { ipv4_address: 172.29.0.21 } }
   sentinel-2:
     <<: *sentinel
-    ports: ["26380:26379"]
+    ports: ["26480:26379"]
+    networks: { default: { ipv4_address: 172.29.0.22 } }
   sentinel-3:
     <<: *sentinel
-    ports: ["26381:26379"]
+    ports: ["26481:26379"]
+    networks: { default: { ipv4_address: 172.29.0.23 } }
 
+  seed:
+    profiles: ["seed"]
+    build: ..
+    command: ["python", "scripts/seed_databases.py", "--drop"]
+    environment: *app-env
+    volumes: ["../data/clean:/srv/data/clean:ro"]
+    depends_on: *app-depends
   api:
     profiles: ["app"]
     build: ..
-    environment:
-      MONGO_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0
-      REDIS_SENTINELS: sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
-      JWT_SECRET: change-me-in-real-env-change-me-in-real-env
-      CORS_ORIGINS: http://localhost:8080
-    ports: ["8000:8000"]
-    depends_on: [mongo-init, sentinel-1]
+    environment: *app-env
+    ports: ["8001:8000"]
+    depends_on: *app-depends
+    restart: unless-stopped
   worker:
     profiles: ["app"]
     build: ..
     command: ["python", "-m", "app.worker"]
-    environment:
-      MONGO_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0
-      REDIS_SENTINELS: sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
-    depends_on: [mongo-init, sentinel-1]
+    environment: *app-env
+    depends_on: *app-depends
+    restart: unless-stopped
   frontend:
     profiles: ["app"]
     build: ../../MedSignal-Frontend
     ports: ["8080:80"]
     depends_on: [api]
+
+networks:
+  default:
+    ipam:
+      config:
+        # fixed addresses (.10-.23) for Redis and Sentinels; every other container gets one from .128 up
+        - subnet: 172.29.0.0/24
+          ip_range: 172.29.0.128/25
 
 volumes:
   mongo1-data: {}

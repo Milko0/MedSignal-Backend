@@ -1,0 +1,10 @@
+# Keep the image small: the dataset is mounted (seed service) or loaded into MongoDB, never baked in.
+data/
+.venv/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+tests/
+.git/
+.env
+*.pyc
