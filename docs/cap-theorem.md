@@ -4,11 +4,11 @@ The brief asks for the application to be analysed against the CAP theorem after 
 performance tests of reads and writes. This file is the analysis; `scripts/benchmark_cluster.py` produces the numbers.
 Design decisions behind it: ADR 0001 (self-hosted databases), ADR 0003 (read preference per use case).
 
-> **Status of the numbers.** Everything in section 5 was measured on a **local test cluster on one laptop**
-> (3 `mongod` 7.0.14 as a replica set and a Redis 5.0.14 primary + 2 replicas + 3 Sentinels, all on loopback), one run
-> each. It proves the script and the behaviours (what is lost, what pauses, who serves reads); the absolute speeds
-> are not representative of the real 3+3 cluster or the Virtual Lab, because there is no network latency and all
-> nodes share one CPU. Re-run on the real cluster and replace the tables. Raw output: `docs/perf-local-results.json`.
+> **Status of the numbers.** Section 5 was measured on the **Docker 3 + 3 cluster** of
+> `deploy/docker-compose.local.yml` (MongoDB 7 replica set, Redis 7.4 primary + 2 replicas + 3 Sentinels) on one
+> laptop, one run each, on 25 November 2026. The behaviours (what is lost, what pauses, who serves reads) are the
+> results; the absolute speeds would be higher on separate machines such as the Virtual Lab, where the same script
+> can be re-run. Raw output: `docs/perf-cluster-*.json`.
 
 ## 1. The cluster
 
@@ -40,7 +40,8 @@ store and, for MongoDB, for each operation.
   consistency). If no secondary is within the staleness bound and there is no primary, the read fails. So reads are
   "available unless the whole set is down or too stale", not unconditionally available.
 - **Accounts and batch jobs read the primary**, so a login or a signal computation sees what was just written
-  (read-your-writes). During an election those requests fail, which the frontend shows as a retryable error.
+  (read-your-writes). During an election (11-12 s measured) those requests fail after the API's 3 s server
+  selection timeout and succeed when repeated.
 
 Not partitioned (PACELC "else" branch): majority writes cost one extra round trip to a secondary, and secondary reads
 return results that are milliseconds old but take load off the primary. The benchmark measures both ends of that
@@ -81,7 +82,7 @@ holds only data that can be rebuilt or is cheap to lose.** That split is the des
 
 ## 3. What the benchmark measures
 
-`py scripts/benchmark_cluster.py <suite>` (details and flags in the script header). Everything runs in the scratch
+`scripts/benchmark_cluster.py <suite>` (details and flags in the script header; how to run it below). Everything runs in the scratch
 database `medsignal_bench` and `bench:*` Redis keys, deleted at the end.
 
 | Suite | Question | How |
@@ -90,22 +91,28 @@ database `medsignal_bench` and `bench:*` Redis keys, deleted at the end.
 | `mongo-reads` | What do secondaries buy? | Point lookup, signal-explorer query and a statistics aggregation with `primary`, `secondaryPreferred`, `secondary`, `nearest`. Also prints which node served the point lookups, which proves secondaries were used. |
 | `staleness` | How eventual is "eventual"? | Write, then read at once from a secondary. Share of reads that miss it for `w=1`, `majority`, `majority` read concern, and a causally consistent session (read-your-writes). |
 | `redis` | Redis vs MongoDB, and the price of `WAIT` | `SET` alone vs `SET`+`WAIT 1`/`WAIT 2`; the app's follow transaction; `GET` on master vs replica; `SISMEMBER`; MongoDB `find_one` by `_id` as the comparison. Also counts `WAIT`s that returned fewer acknowledgements than asked. |
-| `mongo-failover` | What happens to writes in an election? | Writes and secondary reads run continuously; `replSetStepDown` (or `--manual`: stop the container). Reports the longest write pause, write errors, how long until writes resume, secondary-read pause, and **acknowledged writes lost** (verified with a majority read afterwards). Run with `--w majority` and `--w 1`. |
-| `redis-failover` | What does async replication lose? | Concurrent writers, `SENTINEL FAILOVER` (or `--manual`: `docker pause redis-primary`, which is closer to a real failure). Reports pause, errors and **acknowledged writes missing on the new master**. Run with `--wait 0` and `--wait 1`. |
+| `mongo-failover` | What happens to writes in an election? | Writes and secondary reads run continuously; `replSetStepDown` (or `--manual`: kill the primary container yourself). Reports the longest write pause, write errors, how long until writes resume, secondary-read pause, and **acknowledged writes lost** (verified with a majority read afterwards). Run with `--w majority` and `--w 1`. |
+| `redis-failover` | What does async replication lose? | Concurrent writers, `SENTINEL FAILOVER` (or `--manual`: stop or isolate the master yourself). Reports pause, errors and **acknowledged writes missing on the new master**. Run with `--wait 0` and `--wait 1`. |
 
-Run order on the cluster (about 5 minutes without the failovers):
+Run on the Docker cluster through the `bench` service (it runs inside the compose network, where the member names
+and Sentinel's addresses resolve, and mounts `docs/` for `--out`). About 5 minutes without the failovers:
 
 ```bash
-export MONGO_URI="mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0"
-export REDIS_SENTINELS="sentinel-1:26379,sentinel-2:26379,sentinel-3:26379"
-py scripts/benchmark_cluster.py all --out docs/perf-results.json
-py scripts/benchmark_cluster.py mongo-failover --w majority --out docs/perf-mongo-failover-majority.json
-py scripts/benchmark_cluster.py mongo-failover --w 1 --manual      # stop mongo1 when told to
-py scripts/benchmark_cluster.py redis-failover --wait 0 --manual   # docker pause redis-primary when told to
-py scripts/benchmark_cluster.py redis-failover --wait 1 --manual
+docker compose -f deploy/docker-compose.local.yml --profile bench build bench
+B="docker compose -f deploy/docker-compose.local.yml --profile bench run --rm -e PYTHONUNBUFFERED=1 bench"
+$B all --out docs/perf-cluster-results.json
+$B mongo-failover --w majority --out docs/perf-cluster-mongo-stepdown.json     # automatic replSetStepDown
+$B mongo-failover --w 1 --manual                                              # kill the primary when told to:
+#   docker compose -f deploy/docker-compose.local.yml kill mongo1   (then: ... start mongo1)
+$B mongo-failover --w majority --manual                                       # same kill, majority writes
+$B redis-failover --wait 0 --out docs/perf-cluster-redis-failover.json        # automatic SENTINEL FAILOVER
+$B redis-failover --wait 1 --out docs/perf-cluster-redis-failover-wait1.json
 ```
 
-The numbers from the local test run, and how to read them, are in section 5.
+It cannot run from the host: `mongo1..3` and the Redis addresses Sentinel returns (172.29.0.x) only resolve inside
+the compose network. `PYTHONUNBUFFERED=1` makes the "stop the primary now" line appear at the right moment.
+
+The numbers from the cluster run, and how to read them, are in section 5.
 
 ## 4. Eventual consistency in the application
 
@@ -123,93 +130,107 @@ The brief wants the replicas "managed in terms of eventual consistency". The app
   with the analytics handle on the secondaries. That run found a bug the unit test with fakes could not: a PyMongo
   collection cannot be used in `col or default` (it refuses `bool()`), now fixed.
 
-## 5. Measured results (local test cluster, one run each)
+## 5. Measured results (Docker 3 + 3 cluster, 25 November 2026)
 
-Setup: see the status note at the top. 16 operations in flight, 2,000 operations per row, 20,000 documents or keys
-for the read tests. Differences below roughly 15-20% are inside the noise of a single run on a shared laptop and
-are not claimed as findings.
+Setup: `deploy/docker-compose.local.yml` on one Windows laptop with Docker Desktop: MongoDB 7 replica set `rs0`
+(3 members), Redis 7.4 primary + 2 replicas + 3 Sentinels, each in its own container on the compose network. The
+benchmark ran inside that network (`bench` service), 16 operations in flight, 2,000 operations per row, 20,000
+documents or keys for the read tests, one run each. All containers share the laptop's CPU and disk, so absolute
+speeds are lower than on separate machines and differences below roughly 15-20% are noise. What is lost, what
+pauses and which node serves a read do not depend on that. Raw output: `docs/perf-cluster-*.json`. The first run on
+a bare-metal laptop cluster (no containers) is kept in `docs/perf-local-results.json`; it showed the same behaviour.
 
 **MongoDB writes** (`insert_one`, ops/s; p95 in ms)
 
 | Write concern | ops/s | p95 ms | 100-doc `insert_many`, docs/s |
 |---|---|---|---|
-| `w=1` | 1,952 | 11.9 | 45,044 |
-| `w=1` + journal | 1,697 | 13.4 | 55,749 |
-| `w=majority` (what the app uses) | 1,610 | 13.1 | 35,679 |
-| `w=3` (all nodes) | 2,206 | 11.5 | 34,730 |
+| `w=1` | 1,053 | 18.2 | 34,227 |
+| `w=1` + journal | 1,064 | 20.9 | 21,165 |
+| `w=majority` (what the app uses) | 955 | 22.9 | 17,305 |
+| `w=3` (all nodes) | 1,126 | 17.0 | 17,531 |
 
-Reading: majority costs about 17% on single inserts and about 21% on bulk inserts against `w=1`; the other
-differences (`w=3` faster than `w=1`, journal faster in bulk) are noise. On a real network the majority penalty is one
-round trip to a secondary, so it should be larger.
+Reading: on single inserts majority costs about 10%, inside the noise. On bulk inserts, where the wait for the
+secondaries is not hidden by the per-request overhead, majority halves the throughput (34,227 -> 17,305 docs/s).
+That is the price of the durability the failover tests below show. `w=3` costs the same as majority here because
+all three nodes are healthy; it would stop writes entirely with one node down.
 
 **MongoDB reads by read preference** (ops/s)
 
 | | point lookup | signal explorer | statistics aggregation |
 |---|---|---|---|
-| `primary` | 4,227 | 3,340 | 2,728 |
-| `secondaryPreferred` | 3,266 | 3,289 | 3,414 |
-| `secondary` | 4,251 | 3,599 | 3,173 |
-| `nearest` | 4,260 | 3,543 | 3,001 |
+| `primary` | 1,773 | 1,542 | 1,469 |
+| `secondaryPreferred` (what the analytics use) | 1,339 | 1,392 | 1,509 |
+| `secondary` | 1,636 | 1,444 | 1,127 |
+| `nearest` | 1,540 | 1,210 | 1,205 |
 
-Served by (point lookups, 2,000 each): `primary` 100% on `:27117`; `secondaryPreferred` and `secondary` split
-50/50 over the two secondaries; `nearest` spread over all three. So the routing in ADR 0003 does reach the
-secondaries. On one machine the speeds are the same within noise, because the three nodes share one CPU: the benefit
-of secondaries (more CPU and I/O for aggregations) can only show on separate machines.
+Served by (point lookups, 2,000 each): `primary` 100% `mongo1`; `secondaryPreferred` and `secondary` 1,000 each on
+`mongo2` and `mongo3`; `nearest` about one third on each node. The routing of ADR 0003 does reach the secondaries.
+The speeds are equal within noise because the three containers share one CPU: moving the aggregations off the
+primary pays off only when the nodes are separate machines, where it frees the primary for writes and logins.
 
 **Eventual consistency** (300 write-then-read-from-secondary trials)
 
 | Write / read | Reads that missed the fresh write | Time until visible |
 |---|---|---|
-| `w=1`, read secondary | **300 of 300 (100%)** | mean 4.0 ms, max 23.6 ms |
+| `w=1`, read secondary | **289 of 300 (96%)** | mean 1.4 ms, max 30 ms |
 | `w=majority`, read secondary | 0 | |
 | `w=majority`, read concern majority | 0 | |
 | causal session (read-your-writes) | 0 | |
 
-A read straight after a `w=1` write always missed it here; the data arrived 4 ms later on average. With majority
-writes, on loopback, the secondary the read lands on already has it. That is a property of the local network (the
-acknowledgement and the read are both slower than replication), not a guarantee: only the causal session
-guarantees it. For the app this means the analytics reads are at worst a few milliseconds old.
+With `w=1` a read sent straight to a secondary almost always misses the write; it arrives about 1.4 ms later. With
+majority writes the secondary that answers already had it in every trial. That is a property of this run, not a
+guarantee (with two secondaries, majority waits for one of them; the other may still be behind): only a causal
+session guarantees read-your-writes. For the app, analytics reads are at worst milliseconds old, and the data
+they read changes once per quarter or on a daily poll.
 
 **Redis vs MongoDB, and replication** (Sentinel deployment)
 
 | | ops/s | mean ms | p95 ms |
 |---|---|---|---|
-| `SET`, async replication | 7,554 | 2.05 | 2.29 |
-| `SET` + `WAIT 1` | 5,624 | 2.84 | 3.54 |
-| `SET` + `WAIT 2` | 6,006 | 2.66 | 3.01 |
-| `follow()` (MULTI/EXEC of 2 `SADD`) | 6,969 | 2.29 | 2.86 |
-| `GET`, master | 12,295 | 1.30 | 1.51 |
-| `GET`, replica | 10,022 | 1.54 | 1.80 |
-| `SISMEMBER` (is following) | 12,430 | 1.28 | 1.71 |
-| MongoDB `find_one` by `_id` (primary) | 4,517 | 3.53 | 4.42 |
+| `SET`, async replication | 4,063 | 3.89 | 5.55 |
+| `SET` + `WAIT 1` | 2,500 | 6.38 | 8.03 |
+| `SET` + `WAIT 2` | 2,370 | 6.74 | 9.00 |
+| `follow()` (MULTI/EXEC of 2 `SADD`) | 2,794 | 5.70 | 9.73 |
+| `GET`, master | 4,232 | 3.77 | 4.85 |
+| `GET`, replica | 4,293 | 3.71 | 4.34 |
+| `SISMEMBER` (is following) | 4,353 | 3.66 | 4.54 |
+| MongoDB `find_one` by `_id` (primary) | 1,818 | 8.78 | 9.96 |
 
-Reading: `WAIT` for replicas costs about 0.7 ms per write here (a replica round trip) and every `WAIT` returned the
-full number of acknowledgements. A Redis point read is about 2.7 times faster than the same read from MongoDB, which
-is the reason the cabinet and shortage summaries live in Redis. A replica serves the same data about as fast as the
-master.
+Reading: waiting for one replica costs about 2.5 ms per write (about 40% of the throughput), and every `WAIT` got
+the acknowledgements it asked for while the cluster was healthy. A Redis point read is about 2.3 times faster than
+the same read from MongoDB (3.8 ms against 8.8 ms, most of it the container network), which is why the cabinet,
+follows and shortage summaries live in Redis.
 
-**Failover** (MongoDB: 3 nodes; Redis: Sentinel with `down-after-milliseconds 5000`)
+**Failover** (MongoDB: 3 nodes, election; Redis: Sentinel, `down-after-milliseconds 5000`)
 
-| Test | Longest write pause | Errors | Acknowledged writes lost | Reads during it |
+| Test | Longest write pause | Write errors | Acknowledged writes lost | Reads during it |
 |---|---|---|---|---|
-| Mongo, `replSetStepDown`, `w=majority` | 10.7 s | 0 (client waited) | **0** | secondaries kept answering (longest gap 0.04 s) |
-| Mongo, primary process killed, `w=majority` | 16.4 s | 0 (client waited) | **0** | longest gap 0.03 s |
-| Mongo, primary process killed, `w=1` | 14.8 s | 0 | **3 of 978** | longest gap 0.04 s |
-| Redis, master killed, no `WAIT` | 6.4 s | 64 | 0 of 307,519 | n/a |
-| Redis, master killed, `WAIT 1` | 6.6 s | 64 | 0 of 128,852 | n/a |
+| MongoDB, `replSetStepDown`, `w=majority` | 10.9 s | 0 (client waited) | **0 of 1,699** | secondary reads never stopped (longest gap 0.03 s) |
+| MongoDB, primary container killed, `w=majority` | 12.0 s | 0 (client waited) | **0 of 1,543** | longest gap 0.03 s |
+| MongoDB, primary container killed, `w=1` | 11.1 s | 0 | **10 of 2,789** | longest gap 0.03 s |
+| Redis, `SENTINEL FAILOVER`, no `WAIT` | 0.1 s | 16 | **48,926 of 147,854** | n/a |
+| Redis, `SENTINEL FAILOVER`, `WAIT 1` | 0.3 s | 16 | **818 of 49,641** | n/a |
 
 Reading:
 
-- MongoDB: with `w=majority` nothing acknowledged was lost, while `w=1` lost 3 acknowledged writes in the same
-  test. This is the CP behaviour of section 2 shown with data. Writes were unavailable for 10-16 s (the election);
-  secondary reads were not interrupted.
-- Redis: Sentinel promoted a replica after about 6 s and the client reconnected by itself; 64 writes failed during
-  the gap. **No acknowledged write was lost, but this test cannot show the AP weakness**: killing a process on one
-  machine means its replicas had already received everything it sent. The loss window of asynchronous replication
-  only opens on a real partition or a machine crash, where the old master keeps accepting writes that the
-  replicas never get. Reproducing it needs `docker pause`/network rules on separate hosts; the `redis-failover`
-  suite will count it when run there. Until then the Redis AP claim rests on the documented behaviour of Redis
-  replication, not on a measurement of ours.
+- **MongoDB is CP for writes.** With `w=majority` no acknowledged write was lost, whether the primary stepped down
+  or was killed. With `w=1` the same kill lost 10 writes the client had been told were stored: the killed primary
+  had them, no secondary did, and they were gone once the new primary took over. Writes were unavailable for 11-12 s
+  (the election); the benchmark client waited for the new primary (20 s server selection timeout). The API uses
+  3 s, so requests that need the primary fail during an election and succeed when repeated afterwards (the
+  cluster check saw the same). Secondary reads, which serve the analytics, were never interrupted.
+- **Redis is AP, and the test shows the loss.** During a Sentinel failover the writers kept writing to the old
+  master, which kept accepting (no pause, only 16 errors) after a replica had been promoted. When Sentinel then
+  turned the old master into a replica of the new one, it discarded its data and resynchronised: a third of the
+  acknowledged writes disappeared. `WAIT 1` shrinks the loss sixty-fold but does not remove it, because once the
+  old master's replicas have moved to the new master, `WAIT` returns 0 after its timeout and the write is still
+  acknowledged. This is the split-brain window of section 2, measured.
+- **What it means for MedSignal.** The Redis data written in such a window is a follow, an alert or a revoked token.
+  Alerts are recreated by the projector (deterministic ids, Reconcile); a lost follow is one click to redo; a lost
+  revocation lets a logged-out token work until it expires (at most 60 minutes). The app accepts this in exchange
+  for Redis staying writable. If it were not acceptable, the options are `min-replicas-to-write 1` with
+  `min-replicas-max-lag` (refuse writes on a master that lost its replicas, which bounds the window), checking the
+  value returned by `WAIT`, or moving revocations to MongoDB.
 
 **Other finding.** An index build on a collection waits for *all* voting members by default. With one MongoDB node
 down, `create_index` in the first version of the benchmark blocked indefinitely. The benchmark now sends

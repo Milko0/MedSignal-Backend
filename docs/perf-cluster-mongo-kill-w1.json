@@ -1,0 +1,14 @@
+{
+  "mongo_failover_w1": {
+    "write_concern": "1",
+    "acked": 2789,
+    "write_errors": 0,
+    "acked_writes_lost": 10,
+    "unacked_but_stored": 0,
+    "longest_write_pause_s": 11.12,
+    "writes_resumed_after_failure_s": 14.07,
+    "secondary_reads_ok": 1289,
+    "read_errors": 0,
+    "longest_read_pause_s": 0.03
+  }
+}

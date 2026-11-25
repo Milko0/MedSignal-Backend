@@ -9,8 +9,15 @@
     py scripts/benchmark_cluster.py all                   # everything except the two failover tests
     py scripts/benchmark_cluster.py all --out docs/perf-results.json
 
-Settings come from .env (MONGO_URI, REDIS_SENTINELS / REDIS_URL). Use the replica-set URI on the cluster:
-MONGO_URI=mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0. Everything is written to the scratch
+On the Docker cluster (deploy/docker-compose.local.yml) run it inside the cluster network, through the `bench`
+service, which has the replica-set and Sentinel settings and mounts docs/ for --out:
+
+    docker compose -f deploy/docker-compose.local.yml --profile bench run --rm bench all --out docs/perf-cluster-results.json
+    docker compose -f deploy/docker-compose.local.yml --profile bench run --rm bench mongo-failover --w 1 --manual
+
+From the host it cannot work: the member names mongo1..3 and the Redis addresses Sentinel returns (172.29.0.x) only
+resolve inside that network. Elsewhere, settings come from .env (MONGO_URI, REDIS_SENTINELS / REDIS_URL) with the
+replica-set URI. Everything is written to the scratch
 database `medsignal_bench` and to Redis keys `bench:*`, both removed at the end (--keep leaves them); the real
 database is never touched. The results feed docs/cap-theorem.md.
 """
@@ -357,7 +364,7 @@ async def mongo_failover(settings, args) -> None:
     await asyncio.sleep(args.before)
     fail_at = time.perf_counter() - t0
     if args.manual:
-        print(f"\n>>> t={fail_at:.1f}s: stop the primary now (docker stop mongo1). Waiting {args.after}s ...")
+        print(f"\n>>> t={fail_at:.1f}s: stop the primary now (e.g. docker compose -f deploy/docker-compose.local.yml kill <primary>). Waiting {args.after}s ...")
     else:
         print(f"\n>>> t={fail_at:.1f}s: replSetStepDown on the primary")
         try:
@@ -411,7 +418,7 @@ async def redis_failover(settings, args) -> None:
     await asyncio.sleep(args.before)
     fail_at = time.perf_counter() - t0
     if args.manual:
-        print(f"\n>>> t={fail_at:.1f}s: stop or pause the primary now (docker pause redis-primary). Waiting {args.after}s ...")
+        print(f"\n>>> t={fail_at:.1f}s: stop or pause the primary now (e.g. cut it off from its replicas and Sentinels, see docs/cap-theorem.md). Waiting {args.after}s ...")
     else:
         print(f"\n>>> t={fail_at:.1f}s: SENTINEL FAILOVER {settings.redis_master_name}")
         sentinel_conn = sentinel.sentinels[0]
@@ -464,6 +471,7 @@ async def main() -> None:
         print(f"\n===== {name} =====")
         await SUITES[name](settings, args)
     if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(json.dumps(RESULTS, indent=2), encoding="utf-8")
         print(f"\nResults written to {args.out}")
 

@@ -103,6 +103,16 @@ services:
     environment: *app-env
     depends_on: *app-depends
     restart: unless-stopped
+  # Read/write and failover benchmark (docs/cap-theorem.md). It must run inside this network: the replica-set member
+  # names and the Redis addresses Sentinel returns do not resolve on the host. docs/ is mounted for --out.
+  #   docker compose -f deploy/docker-compose.local.yml --profile bench run --rm bench all --out docs/perf-cluster-results.json
+  bench:
+    profiles: ["bench"]
+    build: ..
+    entrypoint: ["python", "scripts/benchmark_cluster.py"]
+    environment: *app-env
+    volumes: ["../docs:/srv/docs"]
+    depends_on: *app-depends
   frontend:
     profiles: ["app"]
     build: ../../MedSignal-Frontend

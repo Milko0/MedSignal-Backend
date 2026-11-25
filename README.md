@@ -372,6 +372,17 @@ worker's "new signal" alert in Redis, replays the change (still one alert), stop
 is elected and the API keeps writing), stops the Redis primary (Sentinel promotes a replica and the API keeps writing)
 and restarts the worker (it resumes from the saved change-stream token). Every step prints what it saw.
 
+**Measure it** (read/write performance, staleness and failover for the CAP analysis in `docs/cap-theorem.md`). The
+benchmark runs inside the compose network through the `bench` service, because the replica-set member names and the
+Redis addresses Sentinel returns do not resolve on the host; results go to `docs/`:
+
+```bash
+docker compose -f deploy/docker-compose.local.yml --profile bench run --rm bench all --out docs/perf-cluster-results.json
+docker compose -f deploy/docker-compose.local.yml --profile bench run --rm bench redis-failover --out docs/perf-cluster-redis-failover.json
+```
+
+The other failover runs (MongoDB step-down and killed primary, `WAIT 1`) are listed in `docs/cap-theorem.md`, section 3.
+
 The frontend for options A and B runs with `npm run dev` in `MedSignal-Frontend` (http://localhost:5173).
 
 `pytest` also runs the conformance suite against the local MongoDB and Redis of option B when they are reachable (test
@@ -459,7 +470,7 @@ The `virtual-lab` files are an untested template: confirm ports and networking w
 | External clients with retry and rate limit, RxNav disk cache | Done, tested with a mock transport; **not run against the live APIs** |
 | MongoDB adapters, aggregation pipelines, indexes, Redis stores, change-stream projector | Done; conformance suite on MongoDB 8 + Redis 8; projector running on the replica set (signal alerts, live counters, resume token) |
 | Admin CRUD (FR-22 to FR-25), ingestion triggers over HTTP (FR-19, FR-20, background jobs, 202) | Done, tested |
-| Secondary reads for analytics, CAP analysis, sharding design | Reads routed and unit-tested (`test_read_routing.py`); `scripts/benchmark_cluster.py` run on a local 3+3 test cluster (one laptop, results in `docs/cap-theorem.md`); **not yet run on the real cluster or the Virtual Lab** |
+| Secondary reads for analytics, CAP analysis, sharding design | Reads routed and unit-tested (`test_read_routing.py`); `scripts/benchmark_cluster.py` run on the Docker 3 + 3 cluster (25 Nov 2026, results in `docs/cap-theorem.md`): majority writes lost nothing on a killed primary, `w=1` lost 10 writes; a Sentinel failover lost acknowledged Redis writes (AP, measured); **not run on the Virtual Lab** |
 | Local replicated cluster (compose) | Tested end to end with `scripts/check_cluster.py`: app through Nginx, seed through the replica set (both secondaries hold every document), a MongoDB change creating a signal alert in under a second, replay creating no duplicate, MongoDB primary stopped (new primary in 10-20 s, API keeps writing), Redis primary stopped (Sentinel promotes a replica in about 8 s, API keeps writing), worker resuming from its token |
 | `virtual-lab` template | Not run on the lab VMs yet |
 | Run on the real raw data (size, match rates, signal sanity) | Done: 6 quarters, ~133k reports, ~350 MB clean |

@@ -9,7 +9,12 @@ Needs: pip install requests python-dotenv
 Optional: OPENFDA_API_KEY in .env (free, https://open.fda.gov/apis/authentication/)
 Sections 1-10: original checks. 11-15: new APIs. 16-20: cross-source demos.
 """
-import os, sys, math, time, urllib.parse
+import math
+import os
+import sys
+import time
+import urllib.parse
+
 import requests
 from dotenv import load_dotenv
 
@@ -129,7 +134,7 @@ def shortage_count(name, status="Current"):
 
 
 def rxcui_of(name):
-    sc, d = jget(f"{RX}/rxcui.json?name={urllib.parse.quote(name)}")
+    _sc, d = jget(f"{RX}/rxcui.json?name={urllib.parse.quote(name)}")
     ids = (d or {}).get("idGroup", {}).get("rxnormId", [])
     return ids[0] if ids else None
 
@@ -425,7 +430,7 @@ if on(20):
         t = two_by_two(f"receivedate:[{s} TO {e}]", DRUG, REACTION)
         st = prr_stats(*t) if t else None
         if st:
-            print(f"{q:8s}{t[0]:6d}{st['prr']:7.2f}{st['ci_low']:8.2f}{str(st['signal']):>7s}")
+            print(f"{q:8s}{t[0]:6d}{st['prr']:7.2f}{st['ci_low']:8.2f}{st['signal']!s:>7s}")
         else:
             print(f"{q:8s} (no data / failed)")
         time.sleep(0.5)

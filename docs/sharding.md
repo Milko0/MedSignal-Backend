@@ -4,10 +4,12 @@ The brief says to "argue and, if needed, design" sharding. This is a design and 
 implemented or deployed. The working system is one MongoDB replica set and one Redis primary with replicas
 (see `cap-theorem.md` for how they behave).
 
-**Position:** at the size of this project (the rolling 4-6 quarter window) one replica set per database is enough, and
+**Position:** at the size of this project (a rolling window of 6 quarters) one replica set per database is enough, and
 sharding would add operational cost without a measured need. The designs below are what we would do when the data
-outgrows one node, and they were chosen so that the current code needs few changes. Sizes marked *(estimate)* come from
-the 86,778-report sample and must be checked with `db.reports.stats()` before anyone acts on them.
+outgrows one node, and they were chosen so that the current code needs few changes. Measured on the cluster
+(`db.reports.stats()`, 25 November 2026): `reports` holds 132,804 documents, 281 MB of data stored in 83 MB plus 27 MB
+of indexes; the whole database is 416 MB of data in 141 MB plus 49 MB of indexes. Sizes marked *(estimate)* are
+extrapolations from these numbers.
 
 ## 1. When sharding becomes worth it
 
@@ -17,7 +19,7 @@ Shard when one of these is true, not before:
 - write throughput of ingestion exceeds what one primary can journal;
 - storage exceeds one disk.
 
-The window is the lever. With 4-6 quarters, the full FAERS set is on the order of 1-2 million reports *(estimate)*,
+The window is the lever. With 6 quarters, the full FAERS set (not our sample of 2 partitions per quarter) is on the order of 1-2 million reports *(estimate)*,
 a few GB: it fits on one node. Dropping the window to keep history since 2004 would be roughly 15-20 times that
 *(estimate)*, and that is the case that justifies a cluster.
 
@@ -119,7 +121,8 @@ two different slots and the transaction is rejected with `CROSSSLOT`. Options:
 
 1. **Two single-slot writes, not atomic, with a repair path** (recommended). Write `follows:{user}` first (what the
    user reads), then `followers:{rxcui}` (what the dispatcher reads). A crash between them leaves a followed drug
-   that does not raise alerts until repair. The existing Reconcile job can rebuild `followers` from `follows`, and
+   that does not raise alerts until repair. Reconcile would need a new step that rebuilds `followers` from `follows` (today it only
+   rebuilds shortage summaries), and
    the writes are idempotent (`SADD`/`SREM`), so a retry is safe.
 2. **Make MongoDB the source of truth for follows** (a `follows` array on the user document) and project both Redis
    sets from the change stream, like shortage summaries already are. Cleanest consistency story, most work.

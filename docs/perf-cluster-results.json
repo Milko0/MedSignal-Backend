@@ -1,0 +1,322 @@
+{
+  "mongo_writes": {
+    "insert_one": {
+      "w=1": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 1053,
+        "mean_ms": 15.16,
+        "p50_ms": 12.82,
+        "p95_ms": 18.15,
+        "p99_ms": 101.6
+      },
+      "w=1, journal": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 1064,
+        "mean_ms": 14.94,
+        "p50_ms": 14.51,
+        "p95_ms": 20.9,
+        "p99_ms": 25.76
+      },
+      "w=majority": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 955,
+        "mean_ms": 16.66,
+        "p50_ms": 15.83,
+        "p95_ms": 22.92,
+        "p99_ms": 30.45
+      },
+      "w=3 (all nodes)": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 1126,
+        "mean_ms": 14.15,
+        "p50_ms": 13.83,
+        "p95_ms": 17.02,
+        "p99_ms": 28.51
+      }
+    },
+    "insert_many_100": {
+      "w=1": {
+        "ops": 100,
+        "errors": 0,
+        "per_sec": 34227,
+        "mean_ms": 11.3,
+        "p50_ms": 10.24,
+        "p95_ms": 19.46,
+        "p99_ms": 23.72
+      },
+      "w=1, journal": {
+        "ops": 100,
+        "errors": 0,
+        "per_sec": 21165,
+        "mean_ms": 18.58,
+        "p50_ms": 17.71,
+        "p95_ms": 28.42,
+        "p99_ms": 32.32
+      },
+      "w=majority": {
+        "ops": 100,
+        "errors": 0,
+        "per_sec": 17305,
+        "mean_ms": 22.68,
+        "p50_ms": 22.73,
+        "p95_ms": 29.31,
+        "p99_ms": 31.09
+      },
+      "w=3 (all nodes)": {
+        "ops": 100,
+        "errors": 0,
+        "per_sec": 17531,
+        "mean_ms": 22.52,
+        "p50_ms": 19.74,
+        "p95_ms": 48.72,
+        "p99_ms": 98.51
+      }
+    }
+  },
+  "mongo_reads": {
+    "latency": {
+      "primary: point lookup": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 1773,
+        "mean_ms": 9.0,
+        "p50_ms": 8.47,
+        "p95_ms": 10.97,
+        "p99_ms": 14.43
+      },
+      "primary: signal explorer": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 1542,
+        "mean_ms": 10.34,
+        "p50_ms": 9.69,
+        "p95_ms": 14.64,
+        "p99_ms": 18.08
+      },
+      "primary: statistics aggregation": {
+        "ops": 1000,
+        "errors": 0,
+        "per_sec": 1469,
+        "mean_ms": 10.8,
+        "p50_ms": 10.62,
+        "p95_ms": 13.11,
+        "p99_ms": 15.17
+      },
+      "secondaryPreferred: point lookup": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 1339,
+        "mean_ms": 11.9,
+        "p50_ms": 10.82,
+        "p95_ms": 18.11,
+        "p99_ms": 26.95
+      },
+      "secondaryPreferred: signal explorer": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 1392,
+        "mean_ms": 11.44,
+        "p50_ms": 11.41,
+        "p95_ms": 13.85,
+        "p99_ms": 14.67
+      },
+      "secondaryPreferred: statistics aggregation": {
+        "ops": 1000,
+        "errors": 0,
+        "per_sec": 1509,
+        "mean_ms": 10.5,
+        "p50_ms": 10.25,
+        "p95_ms": 13.01,
+        "p99_ms": 13.8
+      },
+      "secondary: point lookup": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 1636,
+        "mean_ms": 9.74,
+        "p50_ms": 9.68,
+        "p95_ms": 11.37,
+        "p99_ms": 11.86
+      },
+      "secondary: signal explorer": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 1444,
+        "mean_ms": 11.04,
+        "p50_ms": 10.77,
+        "p95_ms": 13.21,
+        "p99_ms": 15.19
+      },
+      "secondary: statistics aggregation": {
+        "ops": 1000,
+        "errors": 0,
+        "per_sec": 1127,
+        "mean_ms": 14.12,
+        "p50_ms": 11.53,
+        "p95_ms": 31.15,
+        "p99_ms": 35.94
+      },
+      "nearest: point lookup": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 1540,
+        "mean_ms": 10.35,
+        "p50_ms": 9.43,
+        "p95_ms": 16.2,
+        "p99_ms": 20.44
+      },
+      "nearest: signal explorer": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 1210,
+        "mean_ms": 13.18,
+        "p50_ms": 12.52,
+        "p95_ms": 18.3,
+        "p99_ms": 28.11
+      },
+      "nearest: statistics aggregation": {
+        "ops": 1000,
+        "errors": 0,
+        "per_sec": 1205,
+        "mean_ms": 13.21,
+        "p50_ms": 11.68,
+        "p95_ms": 21.16,
+        "p99_ms": 64.62
+      }
+    },
+    "served_by": {
+      "primary": {
+        "('mongo1', 27017)": 2000
+      },
+      "secondaryPreferred": {
+        "('mongo2', 27017)": 1000,
+        "('mongo3', 27017)": 1000
+      },
+      "secondary": {
+        "('mongo2', 27017)": 1000,
+        "('mongo3', 27017)": 1000
+      },
+      "nearest": {
+        "('mongo1', 27017)": 670,
+        "('mongo2', 27017)": 665,
+        "('mongo3', 27017)": 665
+      }
+    }
+  },
+  "staleness": {
+    "write w=1, read secondary": {
+      "trials": 300,
+      "stale_reads": 289,
+      "stale_pct": 96.3,
+      "catch_up_ms_mean": 1.4,
+      "catch_up_ms_max": 30.2
+    },
+    "write majority, read secondary": {
+      "trials": 300,
+      "stale_reads": 0,
+      "stale_pct": 0.0,
+      "catch_up_ms_mean": 0.0,
+      "catch_up_ms_max": 0.0
+    },
+    "write majority, majority read": {
+      "trials": 300,
+      "stale_reads": 0,
+      "stale_pct": 0.0,
+      "catch_up_ms_mean": 0.0,
+      "catch_up_ms_max": 0.0
+    },
+    "causal session (read-your-writes)": {
+      "trials": 300,
+      "stale_reads": 0,
+      "stale_pct": 0.0,
+      "catch_up_ms_mean": 0.0,
+      "catch_up_ms_max": 0.0
+    }
+  },
+  "redis": {
+    "writes": {
+      "SET (async replication)": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 4063,
+        "mean_ms": 3.89,
+        "p50_ms": 3.27,
+        "p95_ms": 5.55,
+        "p99_ms": 9.35
+      },
+      "SET + WAIT 1 replica(s)": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 2500,
+        "mean_ms": 6.38,
+        "p50_ms": 5.92,
+        "p95_ms": 8.03,
+        "p99_ms": 17.42
+      },
+      "SET + WAIT 2 replica(s)": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 2370,
+        "mean_ms": 6.74,
+        "p50_ms": 6.48,
+        "p95_ms": 9.0,
+        "p99_ms": 10.61
+      },
+      "follow() MULTI/EXEC": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 2794,
+        "mean_ms": 5.7,
+        "p50_ms": 5.0,
+        "p95_ms": 9.73,
+        "p99_ms": 17.51
+      }
+    },
+    "unreplicated_after_wait": {
+      "WAIT 1": 0,
+      "WAIT 2": 0
+    },
+    "reads": {
+      "Redis GET, master": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 4232,
+        "mean_ms": 3.77,
+        "p50_ms": 3.49,
+        "p95_ms": 4.85,
+        "p99_ms": 7.83
+      },
+      "Redis GET, replica": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 4293,
+        "mean_ms": 3.71,
+        "p50_ms": 3.39,
+        "p95_ms": 4.34,
+        "p99_ms": 5.01
+      },
+      "Redis SISMEMBER (is_following)": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 4353,
+        "mean_ms": 3.66,
+        "p50_ms": 3.58,
+        "p95_ms": 4.54,
+        "p99_ms": 5.37
+      },
+      "MongoDB find_one by _id, primary": {
+        "ops": 2000,
+        "errors": 0,
+        "per_sec": 1818,
+        "mean_ms": 8.78,
+        "p50_ms": 8.29,
+        "p95_ms": 9.96,
+        "p99_ms": 12.39
+      }
+    }
+  }
+}

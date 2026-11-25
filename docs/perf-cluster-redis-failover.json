@@ -1,0 +1,11 @@
+{
+  "redis_failover_wait0": {
+    "wait_replicas": 0,
+    "acked": 147854,
+    "write_errors": 16,
+    "acked_writes_lost": 48926,
+    "longest_write_pause_s": 0.08,
+    "writes_resumed_after_failure_s": 11.28,
+    "new_master": "('172.29.0.11', 6379)"
+  }
+}

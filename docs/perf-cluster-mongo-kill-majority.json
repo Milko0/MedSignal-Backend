@@ -1,0 +1,14 @@
+{
+  "mongo_failover_wmajority": {
+    "write_concern": "majority",
+    "acked": 1543,
+    "write_errors": 0,
+    "acked_writes_lost": 0,
+    "unacked_but_stored": 0,
+    "longest_write_pause_s": 11.95,
+    "writes_resumed_after_failure_s": 14.85,
+    "secondary_reads_ok": 1311,
+    "read_errors": 0,
+    "longest_read_pause_s": 0.03
+  }
+}
