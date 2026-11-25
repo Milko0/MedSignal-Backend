@@ -11,3 +11,4 @@ ignore = ["B008", "UP046"]
 [lint.per-file-ignores]
 "tests/e2e/README_placeholder.py" = ["N999"]
 "scripts/*" = ["ASYNC230"]   # one-off CLI scripts may write files synchronously
+"scripts/benchmark_cluster.py" = ["ASYNC230", "BLE001", "S110"]   # a benchmark counts every failure instead of stopping on it
