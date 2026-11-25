@@ -133,8 +133,10 @@ async def seed_reads(client, n: int) -> None:
     await col.drop()
     for start in range(0, n, 5000):
         await col.insert_many([doc(i) for i in range(start, min(n, start + 5000))], ordered=False)
-    await col.create_index([("quarter", 1), ("is_signal", 1), ("prr", -1)])
-    await col.create_index([("ingredient_rxcui", 1), ("quarter", 1)])
+    # commitQuorum="majority": the default waits for ALL voting members, so one node down would block the build forever
+    await client[BENCH_DB].command({"createIndexes": "reads", "commitQuorum": "majority", "indexes": [
+        {"key": {"quarter": 1, "is_signal": 1, "prr": -1}, "name": "explorer"},
+        {"key": {"ingredient_rxcui": 1, "quarter": 1}, "name": "drug_quarter"}]})
 
 
 async def mongo_reads(settings, args) -> None:
@@ -228,12 +230,13 @@ async def cleanup_mongo(client, args) -> None:
 # ---------------------------------------------------------------- Redis
 
 def redis_clients(settings):
-    """(master, replica or None, sentinel or None). Replica reads need Sentinel (or at least one replica)."""
+    """(master, replica or None, sentinel or None). Replica reads need Sentinel. RESP2 is forced: the benchmark needs
+    no RESP3 feature and it also runs against old Redis builds."""
     if settings.redis_sentinels:
         nodes = [(h.split(":")[0], int(h.split(":")[1])) for h in settings.redis_sentinels.split(",")]
-        s = Sentinel(nodes, socket_timeout=1.0, decode_responses=True)
+        s = Sentinel(nodes, socket_timeout=1.0, decode_responses=True, protocol=2, sentinel_kwargs={"protocol": 2})
         return s.master_for(settings.redis_master_name), s.slave_for(settings.redis_master_name), s
-    return Redis.from_url(settings.redis_url, decode_responses=True), None, None
+    return Redis.from_url(settings.redis_url, decode_responses=True, protocol=2), None, None
 
 
 async def wait_replicas(r: Redis, n: int, timeout_ms: int = 200) -> int:
@@ -276,11 +279,13 @@ async def redis_bench(settings, args) -> None:
     table(f"Redis writes ({args.ops} writes, {args.concurrency} in flight)", writes)
     print("  WAIT calls that returned fewer acknowledgements than requested:", unreplicated)
 
-    for i in range(args.docs):
-        if i % 2000 == 0:
-            await asyncio.sleep(0)
-        await master.set(f"{PREFIX}kv:{i}", json.dumps(doc(i)))
+    print("  seeding keys ...", flush=True)
+    async with master.pipeline(transaction=False) as p:
+        for i in range(args.docs):
+            p.set(f"{PREFIX}kv:{i}", json.dumps(doc(i)))
+        await p.execute()
     await wait_replicas(master, 2, 2000)
+    print("  reading ...", flush=True)
     reads: dict[str, dict] = {}
     reads["Redis GET, master"] = await load(lambda i: master.get(f"{PREFIX}kv:{random.randrange(args.docs)}"), args.ops,
                                             args.concurrency)
@@ -307,9 +312,11 @@ async def redis_bench(settings, args) -> None:
 
 # ---------------------------------------------------------------- failover
 
-def gaps(times: list[float]) -> float:
-    """Longest pause between two successful operations (seconds): the unavailability window seen by the client."""
-    return round(max((b - a for a, b in itertools.pairwise(times)), default=0.0), 2)
+def gaps(times: list[float]) -> tuple[float, float]:
+    """(longest pause between two successful operations in seconds, when it ended): the unavailability window seen by
+    the client and the moment service came back."""
+    best = max(itertools.pairwise(times), key=lambda ab: ab[1] - ab[0], default=(0.0, 0.0))
+    return round(best[1] - best[0], 2), best[1]
 
 
 async def mongo_failover(settings, args) -> None:
@@ -363,11 +370,12 @@ async def mongo_failover(settings, args) -> None:
     verify = client[BENCH_DB].get_collection("failover", read_preference=Primary(), read_concern=ReadConcern("majority"))
     present = {d["_id"] async for d in verify.find({}, {"_id": 1})}
     lost = [i for i in acked if i not in present]
-    after = [t for t in ack_times if t > fail_at]
+    pause, back = gaps(ack_times)
+    read_pause, _ = gaps(read_times)
     result = {"write_concern": str(args.w), "acked": len(acked), "write_errors": write_errors,
               "acked_writes_lost": len(lost), "unacked_but_stored": len(present - set(acked)),
-              "longest_write_pause_s": gaps(ack_times), "writes_resumed_after_s": round(after[0] - fail_at, 2) if after else None,
-              "secondary_reads_ok": len(read_times), "read_errors": read_errors, "longest_read_pause_s": gaps(read_times)}
+              "longest_write_pause_s": pause, "writes_resumed_after_failure_s": round(back - fail_at, 2),
+              "secondary_reads_ok": len(read_times), "read_errors": read_errors, "longest_read_pause_s": read_pause}
     print(json.dumps(result, indent=2))
     RESULTS[f"mongo_failover_w{args.w}"] = result
     await cleanup_mongo(client, args)
@@ -417,10 +425,9 @@ async def redis_failover(settings, args) -> None:
         batch = acked[i:i + 1000]
         values = await new_master.mget([f"{PREFIX}fo:{n}" for n in batch])
         lost += sum(v is None for v in values)
-    after = [t for t in ack_times if t > fail_at]
+    pause, back = gaps(sorted(ack_times))
     result = {"wait_replicas": args.wait, "acked": len(acked), "write_errors": errors, "acked_writes_lost": lost,
-              "longest_write_pause_s": gaps(sorted(ack_times)),
-              "writes_resumed_after_s": round(after[0] - fail_at, 2) if after else None,
+              "longest_write_pause_s": pause, "writes_resumed_after_failure_s": round(back - fail_at, 2),
               "new_master": str(await sentinel.discover_master(settings.redis_master_name))}
     print(json.dumps(result, indent=2))
     RESULTS[f"redis_failover_wait{args.wait}"] = result

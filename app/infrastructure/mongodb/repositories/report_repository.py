@@ -58,7 +58,8 @@ class MongoReportRepository(ReportRepository):
         return sorted(await self.col.distinct("quarter"))
 
     async def _rows(self, pipeline, col=None):
-        return [row async for row in await (col or self.col).aggregate(pipeline, allowDiskUse=True)]
+        col = self.col if col is None else col          # not `col or self.col`: PyMongo collections refuse bool()
+        return [row async for row in await col.aggregate(pipeline, allowDiskUse=True)]
 
     async def pair_counts(self, quarter, role_filter, excluded_terms):
         field, excluded = _drug_field(role_filter), sorted(excluded_terms)

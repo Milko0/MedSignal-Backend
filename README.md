@@ -420,7 +420,7 @@ The `virtual-lab` files are an untested template: confirm ports and networking w
 | External clients with retry and rate limit, RxNav disk cache | Done, tested with a mock transport; **not run against the live APIs** |
 | MongoDB adapters, aggregation pipelines, indexes, Redis stores, change-stream projector | Done; conformance suite on local MongoDB 8 + Redis 8. Projector unit-tested; needs a replica set to run |
 | Admin CRUD (FR-22 to FR-25), ingestion triggers over HTTP (FR-19, FR-20, background jobs, 202) | Done, tested |
-| Secondary reads for analytics, CAP analysis, sharding design | Reads routed and unit-tested (`test_read_routing.py`); `scripts/benchmark_cluster.py` written, **MongoDB suites not yet run on a replica set**, results table in `docs/cap-theorem.md` still empty |
+| Secondary reads for analytics, CAP analysis, sharding design | Reads routed and unit-tested (`test_read_routing.py`); `scripts/benchmark_cluster.py` run on a local 3+3 test cluster (one laptop, results in `docs/cap-theorem.md`); **not yet run on the real cluster or the Virtual Lab** |
 | Compose files, `virtual-lab` template | Compose works locally; `virtual-lab` untested |
 | Run on the real raw data (size, match rates, signal sanity) | Done: 6 quarters, ~133k reports, ~350 MB clean |
 

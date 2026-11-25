@@ -4,10 +4,11 @@ The brief asks for the application to be analysed against the CAP theorem after 
 performance tests of reads and writes. This file is the analysis; `scripts/benchmark_cluster.py` produces the numbers.
 Design decisions behind it: ADR 0001 (self-hosted databases), ADR 0003 (read preference per use case).
 
-> **Status of the numbers.** The script and the analysis are written. The measured tables (section 5) are empty until
-> the script is run on the 3+3 cluster (local compose or the Virtual Lab). The MongoDB suites have not been run
-> against a replica set yet; only the Redis suite was run, on a single Redis 5 without replicas, which proves the
-> script works but says nothing about replication.
+> **Status of the numbers.** Everything in section 5 was measured on a **local test cluster on one laptop**
+> (3 `mongod` 7.0.14 as a replica set and a Redis 5.0.14 primary + 2 replicas + 3 Sentinels, all on loopback), one run
+> each. It proves the script and the behaviours (what is lost, what pauses, who serves reads); the absolute speeds
+> are not representative of the real 3+3 cluster or the Virtual Lab, because there is no network latency and all
+> nodes share one CPU. Re-run on the real cluster and replace the tables. Raw output: `docs/perf-local-results.json`.
 
 ## 1. The cluster
 
@@ -104,18 +105,7 @@ py scripts/benchmark_cluster.py redis-failover --wait 0 --manual   # docker paus
 py scripts/benchmark_cluster.py redis-failover --wait 1 --manual
 ```
 
-Things to expect and to check against the output, from the documented behaviour of the two systems (these are
-hypotheses until measured):
-
-- `w=majority` slower than `w=1`, `w=3` the slowest and failing when a node is down; journaling adds a disk wait.
-- `secondaryPreferred` throughput on the aggregation higher than `primary` once the load is high enough to saturate
-  one node; at low load the difference is small or negative (an extra hop).
-- `w=1` reads from a secondary miss a fresh write some of the time; the causal session never does.
-- Redis `GET` well below MongoDB `find_one`; `WAIT` adds about one round trip to a replica.
-- Step-down: writes pause for the election, secondary reads do not; zero acknowledged writes lost with `majority`.
-  When `mongo1` comes back the set holds a second, shorter election to give it back the primary role (priority 2).
-- Redis failover: a short pause (seconds, set by Sentinel timeouts); a few acknowledged writes missing with `--wait 0`,
-  fewer or none with `--wait 1`.
+The numbers from the local test run, and how to read them, are in section 5.
 
 ## 4. Eventual consistency in the application
 
@@ -129,21 +119,100 @@ The brief wants the replicas "managed in terms of eventual consistency". The app
   cannot see the difference.
 - Anything that must see its own write (accounts, signal computation, admin edits) reads the primary.
 - `MONGO_READ_SECONDARIES=false` restores primary-only reads, which is the baseline for the benchmark.
+- The database conformance suite (24 tests) passes against a real replica set and Redis both with primary-only reads and
+  with the analytics handle on the secondaries. That run found a bug the unit test with fakes could not: a PyMongo
+  collection cannot be used in `col or default` (it refuses `bool()`), now fixed.
 
-## 5. Measured results
+## 5. Measured results (local test cluster, one run each)
 
-To be pasted from `docs/perf-results.json` after the cluster run, one table per suite (the script prints them in the
-format below):
+Setup: see the status note at the top. 16 operations in flight, 2,000 operations per row, 20,000 documents or keys
+for the read tests. Differences below roughly 15-20% are inside the noise of a single run on a shared laptop and
+are not claimed as findings.
 
-```
-                                  ops/s     mean      p50      p95      p99  errors   (ms)
-```
+**MongoDB writes** (`insert_one`, ops/s; p95 in ms)
 
-| Suite | Result | Date | Cluster |
+| Write concern | ops/s | p95 ms | 100-doc `insert_many`, docs/s |
 |---|---|---|---|
-| mongo-writes | _not run yet_ | | |
-| mongo-reads | _not run yet_ | | |
-| staleness | _not run yet_ | | |
-| redis | _standalone Redis 5 only: replica reads and `WAIT` not exercised_ | | |
-| mongo-failover | _not run yet_ | | |
-| redis-failover | _not run yet_ | | |
+| `w=1` | 1,952 | 11.9 | 45,044 |
+| `w=1` + journal | 1,697 | 13.4 | 55,749 |
+| `w=majority` (what the app uses) | 1,610 | 13.1 | 35,679 |
+| `w=3` (all nodes) | 2,206 | 11.5 | 34,730 |
+
+Reading: majority costs about 17% on single inserts and about 21% on bulk inserts against `w=1`; the other
+differences (`w=3` faster than `w=1`, journal faster in bulk) are noise. On a real network the majority penalty is one
+round trip to a secondary, so it should be larger.
+
+**MongoDB reads by read preference** (ops/s)
+
+| | point lookup | signal explorer | statistics aggregation |
+|---|---|---|---|
+| `primary` | 4,227 | 3,340 | 2,728 |
+| `secondaryPreferred` | 3,266 | 3,289 | 3,414 |
+| `secondary` | 4,251 | 3,599 | 3,173 |
+| `nearest` | 4,260 | 3,543 | 3,001 |
+
+Served by (point lookups, 2,000 each): `primary` 100% on `:27117`; `secondaryPreferred` and `secondary` split
+50/50 over the two secondaries; `nearest` spread over all three. So the routing in ADR 0003 does reach the
+secondaries. On one machine the speeds are the same within noise, because the three nodes share one CPU: the benefit
+of secondaries (more CPU and I/O for aggregations) can only show on separate machines.
+
+**Eventual consistency** (300 write-then-read-from-secondary trials)
+
+| Write / read | Reads that missed the fresh write | Time until visible |
+|---|---|---|
+| `w=1`, read secondary | **300 of 300 (100%)** | mean 4.0 ms, max 23.6 ms |
+| `w=majority`, read secondary | 0 | |
+| `w=majority`, read concern majority | 0 | |
+| causal session (read-your-writes) | 0 | |
+
+A read straight after a `w=1` write always missed it here; the data arrived 4 ms later on average. With majority
+writes, on loopback, the secondary the read lands on already has it. That is a property of the local network (the
+acknowledgement and the read are both slower than replication), not a guarantee: only the causal session
+guarantees it. For the app this means the analytics reads are at worst a few milliseconds old.
+
+**Redis vs MongoDB, and replication** (Sentinel deployment)
+
+| | ops/s | mean ms | p95 ms |
+|---|---|---|---|
+| `SET`, async replication | 7,554 | 2.05 | 2.29 |
+| `SET` + `WAIT 1` | 5,624 | 2.84 | 3.54 |
+| `SET` + `WAIT 2` | 6,006 | 2.66 | 3.01 |
+| `follow()` (MULTI/EXEC of 2 `SADD`) | 6,969 | 2.29 | 2.86 |
+| `GET`, master | 12,295 | 1.30 | 1.51 |
+| `GET`, replica | 10,022 | 1.54 | 1.80 |
+| `SISMEMBER` (is following) | 12,430 | 1.28 | 1.71 |
+| MongoDB `find_one` by `_id` (primary) | 4,517 | 3.53 | 4.42 |
+
+Reading: `WAIT` for replicas costs about 0.7 ms per write here (a replica round trip) and every `WAIT` returned the
+full number of acknowledgements. A Redis point read is about 2.7 times faster than the same read from MongoDB, which
+is the reason the cabinet and shortage summaries live in Redis. A replica serves the same data about as fast as the
+master.
+
+**Failover** (MongoDB: 3 nodes; Redis: Sentinel with `down-after-milliseconds 5000`)
+
+| Test | Longest write pause | Errors | Acknowledged writes lost | Reads during it |
+|---|---|---|---|---|
+| Mongo, `replSetStepDown`, `w=majority` | 10.7 s | 0 (client waited) | **0** | secondaries kept answering (longest gap 0.04 s) |
+| Mongo, primary process killed, `w=majority` | 16.4 s | 0 (client waited) | **0** | longest gap 0.03 s |
+| Mongo, primary process killed, `w=1` | 14.8 s | 0 | **3 of 978** | longest gap 0.04 s |
+| Redis, master killed, no `WAIT` | 6.4 s | 64 | 0 of 307,519 | n/a |
+| Redis, master killed, `WAIT 1` | 6.6 s | 64 | 0 of 128,852 | n/a |
+
+Reading:
+
+- MongoDB: with `w=majority` nothing acknowledged was lost, while `w=1` lost 3 acknowledged writes in the same
+  test. This is the CP behaviour of section 2 shown with data. Writes were unavailable for 10-16 s (the election);
+  secondary reads were not interrupted.
+- Redis: Sentinel promoted a replica after about 6 s and the client reconnected by itself; 64 writes failed during
+  the gap. **No acknowledged write was lost, but this test cannot show the AP weakness**: killing a process on one
+  machine means its replicas had already received everything it sent. The loss window of asynchronous replication
+  only opens on a real partition or a machine crash, where the old master keeps accepting writes that the
+  replicas never get. Reproducing it needs `docker pause`/network rules on separate hosts; the `redis-failover`
+  suite will count it when run there. Until then the Redis AP claim rests on the documented behaviour of Redis
+  replication, not on a measurement of ours.
+
+**Other finding.** An index build on a collection waits for *all* voting members by default. With one MongoDB node
+down, `create_index` in the first version of the benchmark blocked indefinitely. The benchmark now sends
+`createIndexes` with `commitQuorum: "majority"`. The application's `ensure_indexes` has the same exposure when a
+new index must be built while a node is down (it is a no-op when the indexes already exist); worth knowing for a
+deployment during an outage, not changed here.

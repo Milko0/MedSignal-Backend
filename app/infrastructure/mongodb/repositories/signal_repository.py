@@ -38,7 +38,8 @@ class MongoSignalRepository(SignalRepository):
         return [self._load(d) async for d in cursor], await self.read.count_documents(query)
 
     async def _prrs(self, query, n, col=None):
-        cursor = (col or self.col).find(query, {"prr": 1, "quarter": 1}, sort=[("quarter", -1)], limit=n)
+        col = self.col if col is None else col          # not `col or self.col`: PyMongo collections refuse bool()
+        cursor = col.find(query, {"prr": 1, "quarter": 1}, sort=[("quarter", -1)], limit=n)
         return [d["prr"] async for d in cursor][::-1]          # newest n, returned oldest first
 
     async def previous_prrs(self, ingredient_rxcui, reaction, quarter, n=4):
