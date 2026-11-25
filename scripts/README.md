@@ -19,4 +19,5 @@ Helper scripts, not part of the running service.
 | `medsignal_api_check.py` | Smoke test of all APIs |
 | `download_faers.py` | FAERS manifest and download |
 | `load_sample.py` | Sample loader (stub) |
-| `benchmark_indexes.py` | Index experiments (stub) |
+| `benchmark_indexes.py` | `explain()` of the main queries with and without their index |
+| `benchmark_cluster.py` | Read/write performance, staleness and failover tests on the MongoDB and Redis clusters (`docs/cap-theorem.md`) |

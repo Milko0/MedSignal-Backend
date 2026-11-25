@@ -4,10 +4,16 @@ from app.infrastructure.mongodb.documents import from_doc, replace_many, to_doc
 
 
 class MongoSignalRepository(SignalRepository):
-    """Collection `signals`, `_id` = signal_id (quarter|ingredient|reaction|role_filter)."""
+    """Collection `signals`, `_id` = signal_id (quarter|ingredient|reaction|role_filter).
 
-    def __init__(self, db) -> None:
+    `self.col` (primary): writes and `previous_prrs`, which signal computation needs to see right after it stored the
+    previous quarter. `self.read` (secondaries when `read_db` is given): the explorer, trends and the counts shown
+    next to alternatives.
+    """
+
+    def __init__(self, db, read_db=None) -> None:
         self.col = db["signals"]
+        self.read = (read_db if read_db is not None else db)["signals"]
 
     def _load(self, doc):
         return from_doc(SafetySignal, doc, "signal_id")
@@ -28,11 +34,12 @@ class MongoSignalRepository(SignalRepository):
             query["is_signal"] = True
         if only_emerging:
             query["is_emerging"] = True
-        cursor = self.col.find(query, sort=[("prr", -1), ("a", -1), ("_id", 1)], skip=skip, limit=limit)
-        return [self._load(d) async for d in cursor], await self.col.count_documents(query)
+        cursor = self.read.find(query, sort=[("prr", -1), ("a", -1), ("_id", 1)], skip=skip, limit=limit)
+        return [self._load(d) async for d in cursor], await self.read.count_documents(query)
 
-    async def _prrs(self, query, n):
-        cursor = self.col.find(query, {"prr": 1, "quarter": 1}, sort=[("quarter", -1)], limit=n)
+    async def _prrs(self, query, n, col=None):
+        col = self.col if col is None else col          # not `col or self.col`: PyMongo collections refuse bool()
+        cursor = col.find(query, {"prr": 1, "quarter": 1}, sort=[("quarter", -1)], limit=n)
         return [d["prr"] async for d in cursor][::-1]          # newest n, returned oldest first
 
     async def previous_prrs(self, ingredient_rxcui, reaction, quarter, n=4):
@@ -40,14 +47,14 @@ class MongoSignalRepository(SignalRepository):
                                  "quarter": {"$lt": quarter}}, n)
 
     async def trend(self, ingredient_rxcui, reaction, n=6):
-        return await self._prrs({"ingredient_rxcui": ingredient_rxcui, "reaction_term": reaction}, n)
+        return await self._prrs({"ingredient_rxcui": ingredient_rxcui, "reaction_term": reaction}, n, self.read)
 
     async def signal_count(self, ingredient_rxcui, quarter):
-        return await self.col.count_documents({"ingredient_rxcui": ingredient_rxcui, "quarter": quarter,
+        return await self.read.count_documents({"ingredient_rxcui": ingredient_rxcui, "quarter": quarter,
                                                "is_signal": True})
 
     async def latest_quarter(self):
-        doc = await self.col.find_one({}, {"quarter": 1}, sort=[("quarter", -1)])
+        doc = await self.read.find_one({}, {"quarter": 1}, sort=[("quarter", -1)])
         return doc["quarter"] if doc else None
 
     async def delete_quarter(self, quarter):

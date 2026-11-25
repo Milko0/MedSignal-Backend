@@ -131,6 +131,7 @@ MedSignal-Backend/
 │   ├── seed_databases.py            # data/clean -> MongoDB (through the ports)
 │   ├── check_cluster.py             # end-to-end test of the Docker cluster: alerts, replays, MongoDB and Redis failover
 │   ├── benchmark_indexes.py         # explain() before/after indexes
+│   ├── benchmark_cluster.py         # write concern, read preference, staleness, Redis WAIT, failover tests
 │   └── medsignal_api_check.py       # live API sanity checks
 ├── deploy/
 │   ├── docker-compose.local.yml     # MongoDB x3, Redis x3, Sentinels (+ `seed` and `app` profiles)
@@ -225,7 +226,7 @@ Lists that grow with the data are paginated with `page` (from 1) and `page_size`
 | `users`, `excluded_terms`, `ingestion_runs`, `sync_checkpoints` | Accounts, FR-26 terms, FR-21 logs, change-stream resume token |
 
 Indexes are defined in `infrastructure/mongodb/indexes.py` and must be justified with `explain()` before and after (`scripts/benchmark_indexes.py`).
-Sharding candidate: hashed key on ingredient id or report id (never the date alone).
+Sharding: design and argument in `docs/sharding.md` (hashed report id for `reports`; the rest stays unsharded). Read/write consistency per use case and the CAP analysis: `docs/cap-theorem.md`, `docs/adr/0003-read-preference-per-use-case.md`.
 
 **Redis (key-value DB, primary + 2 replicas + Sentinel)** - keys built only in `infrastructure/redis/key_schema.py`, **keyed by ingredient rxcui**:
 
@@ -298,6 +299,7 @@ Copy `.env.example` to `.env`.
 | `STORAGE_BACKEND` | `memory` (JSONL in `DATA_DIR`, no databases) or `databases` (Mongo + Redis) |
 | `DATA_DIR`, `CACHE_DIR` | Clean dataset folder (default `data/clean`); RxNav disk cache |
 | `MONGO_URI`, `MONGO_DB` | Host-run API: `mongodb://localhost:27017/?directConnection=true`. Inside compose or on the lab: `mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0` |
+| `MONGO_READ_SECONDARIES`, `MONGO_MAX_STALENESS_SECONDS` | `true` (default): statistics, signal explorer and trends read from secondaries (`secondaryPreferred`, at most 90 s behind); accounts and batch jobs always read the primary. `false`: everything on the primary |
 | `REDIS_URL` | Single Redis node (development) |
 | `REDIS_SENTINELS`, `REDIS_MASTER_NAME` | `host:26379,host:26379,host:26379` and `mymaster`; when set, Sentinel is used instead of `REDIS_URL` |
 | `JWT_SECRET`, `JWT_EXPIRE_MINUTES` | Token signing (use a random secret of at least 32 characters outside development) |
@@ -457,6 +459,7 @@ The `virtual-lab` files are an untested template: confirm ports and networking w
 | External clients with retry and rate limit, RxNav disk cache | Done, tested with a mock transport; **not run against the live APIs** |
 | MongoDB adapters, aggregation pipelines, indexes, Redis stores, change-stream projector | Done; conformance suite on MongoDB 8 + Redis 8; projector running on the replica set (signal alerts, live counters, resume token) |
 | Admin CRUD (FR-22 to FR-25), ingestion triggers over HTTP (FR-19, FR-20, background jobs, 202) | Done, tested |
+| Secondary reads for analytics, CAP analysis, sharding design | Reads routed and unit-tested (`test_read_routing.py`); `scripts/benchmark_cluster.py` run on a local 3+3 test cluster (one laptop, results in `docs/cap-theorem.md`); **not yet run on the real cluster or the Virtual Lab** |
 | Local replicated cluster (compose) | Tested end to end with `scripts/check_cluster.py`: app through Nginx, seed through the replica set (both secondaries hold every document), a MongoDB change creating a signal alert in under a second, replay creating no duplicate, MongoDB primary stopped (new primary in 10-20 s, API keeps writing), Redis primary stopped (Sentinel promotes a replica in about 8 s, API keeps writing), worker resuming from its token |
 | `virtual-lab` template | Not run on the lab VMs yet |
 | Run on the real raw data (size, match rates, signal sanity) | Done: 6 quarters, ~133k reports, ~350 MB clean |

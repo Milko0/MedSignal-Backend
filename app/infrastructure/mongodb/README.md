@@ -11,10 +11,10 @@ Document DB adapters. Collections: `reports`, `signals`, `ingredients`, `rx_conc
 
 ## Rules
 
-- Writes use `w=majority` (NFR-03); heavy reads can use secondaries via `get_collection(..., secondary_ok=True)`.
+- Writes use `w=majority` (NFR-03). Analytics reads (statistics, signal explorer, trends) use secondaries via `analytics_database()` (`secondaryPreferred`, max staleness 90 s); accounts and batch jobs read the primary (`docs/adr/0003-read-preference-per-use-case.md`). `MONGO_READ_SECONDARIES=false` turns it off.
 - `_id` is the natural id of the model (`documents.py`); upserts are idempotent.
 - Every index is in `indexes.py` with the query it serves; check it with `scripts/benchmark_indexes.py`.
-- Sharding candidate for `reports`: hashed `report_id` (NFR-07).
+- Sharding design for every collection: `docs/sharding.md` (NFR-07).
 
 ## Contents
 
