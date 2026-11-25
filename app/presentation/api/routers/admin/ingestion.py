@@ -32,15 +32,19 @@ async def full_load(body: FaersLoadRequest, background: BackgroundTasks, j=Depen
 @router.post("/incremental", status_code=status.HTTP_202_ACCEPTED, response_model=IngestionStarted,
              responses=CONFLICT, summary="Incremental update of shortages, labels and recalls (FR-20)",
              description="Starts in the background and answers at once. Polls the openFDA shortage list (changes are "
-                         "stored as events and alert the followers), then downloads new labels and recalls. The "
-                         "worker runs the shortage part every day at 03:00; this runs it now.")
+                         "stored as events and alert the followers), then downloads the labels and recalls changed "
+                         "in the last `since_days` days. The worker already runs both every day (03:00 and 04:00); "
+                         "this runs them now.")
 async def incremental(background: BackgroundTasks,
                       label_limit: int | None = Query(None, ge=1, le=20000,
                                                       description="At most this many labels (default: all new)"),
+                      since_days: int | None = Query(None, ge=1, le=365,
+                                                     description="Labels and recalls changed in the last N days "
+                                                                 "(default 30)"),
                       j=Depends(jobs)):
     if not j.start("incremental"):
         raise HTTPException(status.HTTP_409_CONFLICT, BUSY)
-    background.add_task(j.incremental, label_limit)
+    background.add_task(j.incremental, label_limit, since_days)
     return IngestionStarted(job="incremental", detail="Polling openFDA; see /api/admin/ingestion/runs")
 
 

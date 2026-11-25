@@ -6,8 +6,9 @@ from app.application.dtos.auth import UserResponse
 from app.application.ports.user_repository import UserRepository
 from app.application.use_cases.profile.manage_profile import ManageProfile
 from app.core.security import hash_password
+from app.domain.entities.enums import Role
 from app.domain.entities.user import User
-from app.domain.exceptions import AlreadyExistsError, NotFoundError
+from app.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationRuleError
 
 
 def _dto(u: User) -> UserResponse:
@@ -28,6 +29,18 @@ class CrudUsers:
         other = await self.users.get_by_username_or_email(value)
         if other is not None and other.user_id != user_id:
             raise AlreadyExistsError(f"{value} is already in use")
+
+    async def _keep_one_admin(self, user: User) -> None:
+        """Refuses to demote or delete the last administrator: nobody could reach /api/admin any more, and a new
+        admin could then only be made on the server (scripts/create_admin.py)."""
+        if user.role is not Role.ADMIN:
+            return
+        skip = 0
+        while page := await self.users.list(skip, 500):         # a few users: one page in practice
+            if any(u.role is Role.ADMIN and u.user_id != user.user_id for u in page):
+                return
+            skip += len(page)
+        raise ValidationRuleError("This is the last administrator: make another admin first")
 
     async def list(self, skip: int, limit: int) -> list[UserResponse]:
         return [_dto(u) for u in await self.users.list(skip, limit)]
@@ -51,7 +64,9 @@ class CrudUsers:
         if body.email and body.email.lower() != user.email:
             await self._check_free(body.email, user_id)
             user.email = body.email.lower()
-        if body.role is not None:
+        if body.role is not None and body.role is not user.role:
+            if body.role is not Role.ADMIN:
+                await self._keep_one_admin(user)
             user.role = body.role
         if body.password:
             user.password_hash = hash_password(body.password)
@@ -59,4 +74,5 @@ class CrudUsers:
         return _dto(user)
 
     async def delete(self, user_id: str) -> None:
+        await self._keep_one_admin(await self._get(user_id))
         await self.profile.delete(user_id)       # also removes the user's follows and alerts

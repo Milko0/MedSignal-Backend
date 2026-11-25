@@ -30,8 +30,8 @@ class ListFeed:
 
     def fetch_shortages(self): return self._it("shortages")
     def fetch_products(self, limit=None): return self._it("products", limit)
-    def fetch_labels(self, limit=None): return self._it("labels", limit)
-    def fetch_recalls(self, limit=None): return self._it("recalls", limit)
+    def fetch_labels(self, limit=None, since=None): return self._it("labels", limit)
+    def fetch_recalls(self, limit=None, since=None): return self._it("recalls", limit)
     def read_bulk_file(self, path): return self._it("reports")
     async def last_updated(self): return "2026-11-10"
 

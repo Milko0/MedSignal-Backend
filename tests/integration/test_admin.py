@@ -22,8 +22,8 @@ class FakeJobs(IngestionJobs):
         super().__init__(c, settings)
         self.calls = []
 
-    async def incremental(self, label_limit):
-        self.calls.append(("incremental", label_limit))
+    async def incremental(self, label_limit, since_days=None):
+        self.calls.append(("incremental", label_limit, since_days))
         self.running.discard("incremental")
 
     async def faers(self, paths, window_quarters):
@@ -91,6 +91,8 @@ def test_shortage_crud_refreshes_the_cached_status(setup):
 
 def test_user_crud_never_returns_passwords(setup):
     client, admin, _, world = setup
+    boss = {"username": "boss", "email": "boss@example.com", "password": "password123", "role": "admin"}
+    assert client.post(f"{P}/users", headers=admin, json=boss).status_code == 201       # luca is not the last admin
     body = {"username": "luca", "email": "Luca@Example.com", "password": "password123", "role": "user"}
     created = client.post(f"{P}/users", headers=admin, json=body).json()
     assert created["email"] == "luca@example.com" and "password" not in created and "password_hash" not in created
@@ -106,13 +108,35 @@ def test_user_crud_never_returns_passwords(setup):
     assert client.get(f"{P}/users/{uid}", headers=admin).status_code == 404
 
 
+def test_the_last_admin_cannot_be_demoted_or_deleted(setup):
+    client, admin, _, _ = setup
+    body = {"username": "solo", "email": "solo@example.com", "password": "password123", "role": "admin"}
+    uid = client.post(f"{P}/users", headers=admin, json=body).json()["user_id"]
+    assert client.put(f"{P}/users/{uid}", headers=admin, json={"role": "user"}).status_code == 422
+    assert client.delete(f"{P}/users/{uid}", headers=admin).status_code == 422
+    other = {**body, "username": "second", "email": "second@example.com"}
+    assert client.post(f"{P}/users", headers=admin, json=other).status_code == 201
+    assert client.put(f"{P}/users/{uid}", headers=admin, json={"role": "user"}).json()["role"] == "user"
+
+
+def test_public_register_cannot_create_an_admin(setup):
+    client, _, _, _ = setup
+    body = {"username": "mallory", "email": "mallory@example.com", "password": "password123", "role": "admin"}
+    r = client.post(f"{API_PREFIX}/auth/register", json=body)
+    assert r.status_code == 201 and r.json()["role"] == "user"                   # the role field is ignored
+    token = client.post(f"{API_PREFIX}/auth/login", json={"identifier": "mallory", "password": "password123"})
+    h = {"Authorization": "Bearer " + token.json()["access_token"]}
+    assert client.get(f"{P}/users", headers=h).status_code == 403
+    assert client.post(f"{P}/users", headers=h, json={**body, "username": "m2", "email": "m2@example.com"}).status_code == 403
+
+
 def test_ingestion_triggers_start_in_the_background(setup):
     client, admin, jobs, _ = setup
-    r = client.post(f"{P}/ingestion/incremental", headers=admin, params={"label_limit": 50})
+    r = client.post(f"{P}/ingestion/incremental", headers=admin, params={"label_limit": 50, "since_days": 3})
     assert r.status_code == 202 and r.json()["job"] == "incremental"
     r = client.post(f"{P}/ingestion/faers", headers=admin, json={"files": ["2026q3-drug-event-0001-of-0031.json.zip"]})
     assert r.status_code == 202
-    assert jobs.calls[0] == ("incremental", 50) and jobs.calls[1][0] == "faers" and jobs.calls[1][2] is None
+    assert jobs.calls[0] == ("incremental", 50, 3) and jobs.calls[1][0] == "faers" and jobs.calls[1][2] is None
 
 
 def test_faers_trigger_rejects_paths_and_missing_files(setup):

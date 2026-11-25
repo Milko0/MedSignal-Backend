@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     data_dir: str = "data/clean"
     cache_dir: str = "data/cache"
     faers_dir: str = "data/faers"          # FAERS bulk files an admin may load over HTTP (FR-19)
+    # Daily labels/recalls update: re-read this many days back. A label can reach openFDA days after its effective
+    # date, so the window is wide; re-reading is harmless (no alert for an unchanged label or a known recall)
+    incremental_lookback_days: int = 30
     # Rolling window of FAERS quarters kept in the dataset (the oldest is dropped when a new one is loaded)
     faers_window_quarters: int = 4
 

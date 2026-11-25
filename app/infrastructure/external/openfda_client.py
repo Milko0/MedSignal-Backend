@@ -1,5 +1,6 @@
 """openFDA feeds. Returns raw dictionaries exactly as the API sends them."""
 from collections.abc import AsyncIterator
+from datetime import date
 
 from app.application.ports.external_data_source import (
     LabelFeed,
@@ -11,6 +12,12 @@ from app.core.config import Settings
 from app.infrastructure.external.http import HttpFetcher
 
 PAGE_SIZE = 1000  # maximum per request; deep paging is limited, so FAERS comes from bulk files
+
+
+def _since(field: str, since: date | None) -> str | None:
+    """openFDA date-range search, e.g. effective_time:[20261118 TO 99991231]. Without it the whole catalogue is paged,
+    which openFDA stops at skip=25000; with it a daily or weekly run reads only what changed."""
+    return None if since is None else f"{field}:[{since:%Y%m%d} TO 99991231]"
 
 
 class OpenFdaFeeds(ShortageFeed, NdcFeed, LabelFeed, RecallFeed):
@@ -48,11 +55,11 @@ class OpenFdaFeeds(ShortageFeed, NdcFeed, LabelFeed, RecallFeed):
     def fetch_products(self, limit: int | None = None) -> AsyncIterator[dict]:
         return self._pages("/drug/ndc.json", limit)
 
-    def fetch_labels(self, limit: int | None = None) -> AsyncIterator[dict]:
-        return self._pages("/drug/label.json", limit)
+    def fetch_labels(self, limit: int | None = None, since: date | None = None) -> AsyncIterator[dict]:
+        return self._pages("/drug/label.json", limit, _since("effective_time", since))
 
-    def fetch_recalls(self, limit: int | None = None) -> AsyncIterator[dict]:
-        return self._pages("/drug/enforcement.json", limit)
+    def fetch_recalls(self, limit: int | None = None, since: date | None = None) -> AsyncIterator[dict]:
+        return self._pages("/drug/enforcement.json", limit, _since("report_date", since))
 
     async def labels_for_ingredient(self, name: str, limit: int = 2) -> list[dict]:
         """Newest prescription labels of one ingredient. Exact generic name first ("SEMAGLUTIDE" -> Ozempic,

@@ -1,6 +1,9 @@
 """Background worker (separate process from the API).
 
 - daily shortage poll (FR-28), 03:00;
+- daily labels and recalls update (FR-20), 04:00: what openFDA changed in the last INCREMENTAL_LOOKBACK_DAYS days,
+  only labels of ingredients the app knows; label changes and new recalls alert the followers;
+- FAERS is quarterly and stays an admin action (download_faers.py, then POST /api/admin/ingestion/faers);
 - with STORAGE_BACKEND=databases: the MongoDB -> Redis change-stream projector (signal counters and alerts,
   shortage summaries). On a standalone mongod (no change streams) it runs Reconcile (FR-27) every 10 minutes instead;
   on a replica set Reconcile still runs hourly as a safety net.
@@ -23,6 +26,7 @@ from app.infrastructure.external.http import HttpFetcher
 from app.infrastructure.external.openfda_client import OpenFdaFeeds
 from app.infrastructure.external.rxnorm_client import RxNavClient
 from app.infrastructure.external.rxnorm_normalizer import RxNormNormalizer
+from app.infrastructure.ingestion_jobs import IngestionJobs
 
 log = logging.getLogger("medsignal.worker")
 
@@ -48,8 +52,15 @@ async def main() -> None:
     async def reconcile_job() -> None:
         log.info("reconcile: %s", await reconcile.execute())
 
+    jobs = IngestionJobs(c, settings)
+
+    async def labels_job() -> None:
+        await jobs.labels_and_recalls()             # changed in the last INCREMENTAL_LOOKBACK_DAYS; logged as a run
+        log.info("labels and recalls updated")
+
     scheduler = AsyncIOScheduler()
     scheduler.add_job(poll_job, "cron", hour=3, minute=0, id="poll_shortages")
+    scheduler.add_job(labels_job, "cron", hour=4, minute=0, id="labels_recalls")
     tasks = []
     if settings.storage_backend == "databases":
         from app.infrastructure.mongodb.client import create_mongo_client

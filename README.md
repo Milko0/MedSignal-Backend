@@ -40,7 +40,8 @@ The only places that know concrete adapters are `app/infrastructure/container_fa
 Ports are named by purpose (`ShortageStatusStore`, `FollowStore`), not by technology.
 
 The backend runs as **two processes**: the API (`uvicorn app.main:app`) and the worker (`python -m app.worker`) with the daily
-shortage poll and the MongoDB change-stream projector, so jobs never run once per API worker.
+shortage poll (03:00), the daily labels and recalls update (04:00, what openFDA changed in the last 30 days, only labels
+of known ingredients) and the MongoDB change-stream projector, so jobs never run once per API worker.
 
 **Two storage backends behind the same ports** (`STORAGE_BACKEND`):
 
@@ -87,7 +88,7 @@ MedSignal-Backend/
 │   │   │   ├── ingestion/           # load_faers_bulk, poll_shortages, update_labels_recalls, link_recalls,
 │   │   │   │                        # compute_quarter_signals, build_clean_dataset, list_ingestion_runs
 │   │   │   ├── sync/                # project_change_event, reconcile
-│   │   │   └── admin/               # manage_excluded_terms (crud_* stubs: labels, reports, shortages, users)
+│   │   │   └── admin/               # manage_excluded_terms, crud_labels/reports/shortages/users
 │   │   └── dtos/                    # admin, auth, cabinet, common, drugs, profile, shortages, signals
 │   ├── infrastructure/
 │   │   ├── clock.py
@@ -132,6 +133,7 @@ MedSignal-Backend/
 │   ├── check_cluster.py             # end-to-end test of the Docker cluster: alerts, replays, MongoDB and Redis failover
 │   ├── benchmark_indexes.py         # explain() before/after indexes
 │   ├── benchmark_cluster.py         # write concern, read preference, staleness, Redis WAIT, failover tests
+│   ├── create_admin.py              # first administrator (admins cannot be created from the web)
 │   └── medsignal_api_check.py       # live API sanity checks
 ├── deploy/
 │   ├── docker-compose.local.yml     # MongoDB x3, Redis x3, Sentinels (+ `seed` and `app` profiles)
@@ -203,6 +205,12 @@ and names its requirement ID (FR-xx) in its summary.
 
 Roles: **Guest** (no token: search, Drug 360, trend, label gaps, signals, statistics, alternatives), **User** (JWT: my medicines,
 alerts, profile, logout), **Admin** (JWT with role `admin`: everything under `/api/admin`, used only through Swagger).
+Registration always creates a `user` (the role field is ignored) and `/api/admin` answers 401 without a token and 403 to
+any non-admin, so an admin cannot be made from the web. The first admin is created on the server:
+`python scripts/create_admin.py --username admin --email admin@medsignal.local` (asks the password; `--promote <name>`
+upgrades an existing account; on Docker: `docker compose -f deploy/docker-compose.local.yml exec -it api python
+scripts/create_admin.py ...`). After that, admins manage roles with `/api/admin/users`; the last admin cannot be demoted
+or deleted.
 In Swagger: `POST /api/auth/login`, copy `access_token`, press **Authorize** and paste it. `POST /api/auth/logout` revokes the
 token at once (its id is stored in Redis until the token would have expired).
 
@@ -403,7 +411,7 @@ then serves everything from `data/clean`.
 
 **Rolling window.** The dataset keeps the newest `FAERS_WINDOW_QUARTERS` calendar quarters (default 4; we use 6). Loading a new quarter
 drops the oldest one, reports and signals together (Q1 Q2 Q3 Q4 -> Q2 Q3 Q4 Q5), so the size stays bounded locally and on the
-Virtual Lab. `--prune` does the same for the downloaded zips. FAERS is published quarterly; shortages are polled daily by the worker.
+Virtual Lab. `--prune` does the same for the downloaded zips. FAERS is published quarterly; shortages, labels and recalls are updated daily by the worker. A new FAERS quarter is loaded by an admin: download it here, then `POST /api/admin/ingestion/faers` with the file names (the Docker API reads them from `data/faers`, mounted read-only).
 `--parts-per-quarter` samples the same number of partitions in every quarter (~12k reports each), so PRRs stay comparable.
 `data/` is git-ignored: the repository holds the scripts that rebuild the dataset, not the data.
 

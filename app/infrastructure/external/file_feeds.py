@@ -72,11 +72,22 @@ class FileFeeds(ShortageFeed, NdcFeed, LabelFeed, RecallFeed, ReportFeed):
     def fetch_products(self, limit=None):
         return self._stream("ndc", limit)
 
-    def fetch_labels(self, limit=None):
-        return self._stream("labels", limit)
+    def fetch_labels(self, limit=None, since=None):
+        return self._since(self._stream("labels"), "effective_time", since, limit)
 
-    def fetch_recalls(self, limit=None):
-        return self._stream("recalls", limit)
+    def fetch_recalls(self, limit=None, since=None):
+        return self._since(self._stream("recalls"), "report_date", since, limit)
+
+    @staticmethod
+    async def _since(records, field, since, limit):
+        """Same filter as the openFDA date range: the field is a YYYYMMDD string."""
+        floor, n = (None if since is None else f"{since:%Y%m%d}"), 0
+        async for rec in records:
+            if limit is not None and n >= limit:
+                return
+            if floor is None or str(rec.get(field) or "") >= floor:
+                n += 1
+                yield rec
 
     async def read_bulk_file(self, path: str) -> AsyncIterator[dict]:
         for rec in _records(Path(path)):

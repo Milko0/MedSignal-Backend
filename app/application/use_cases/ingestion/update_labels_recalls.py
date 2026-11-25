@@ -1,11 +1,20 @@
-"""FR-20: incremental update of labels and recalls, with alerts for label changes and new recalls."""
+"""FR-20: incremental update of labels and recalls, with alerts for label changes and new recalls.
+
+Run every day by the worker with `since` (only what changed in the last days) and `tracked` (the ingredients
+collection): a label is stored only when it belongs to an ingredient the app knows, or when it is already stored,
+so the labels collection does not grow with every drug on the U.S. market. Recalls are all kept (most carry no
+drug identifier and are linked later). Re-reading an overlapping window is harmless: an unchanged label raises no
+alert and a known recall is not new.
+"""
 import uuid
+from datetime import date
 
 from app.application.ingestion.transformers.label import transform_label
 from app.application.ingestion.transformers.recall import transform_recall
 from app.application.ports.clock import Clock
 from app.application.ports.external_data_source import LabelFeed, RecallFeed
 from app.application.ports.ingestion_run_repository import IngestionRunRepository
+from app.application.ports.ingredient_repository import IngredientRepository
 from app.application.ports.label_repository import LabelRepository
 from app.application.ports.recall_repository import RecallRepository
 from app.application.services.alert_dispatcher import AlertDispatcher
@@ -19,16 +28,17 @@ from app.domain.exceptions import TransformError
 class UpdateLabelsAndRecalls:
     def __init__(self, label_feed: LabelFeed, recall_feed: RecallFeed, labels: LabelRepository,
                  recalls: RecallRepository, resolver: IngredientResolver, dispatcher: AlertDispatcher,
-                 runs: IngestionRunRepository, clock: Clock) -> None:
+                 runs: IngestionRunRepository, clock: Clock, tracked: IngredientRepository | None = None) -> None:
         self.label_feed, self.recall_feed, self.labels, self.recalls = label_feed, recall_feed, labels, recalls
         self.resolver, self.dispatcher, self.runs, self.clock = resolver, dispatcher, runs, clock
+        self.tracked = tracked
 
-    async def execute(self, limit: int | None = None) -> IngestionRun:
+    async def execute(self, limit: int | None = None, since: date | None = None) -> IngestionRun:
         now = self.clock.now()
         run = IngestionRun(run_id=str(uuid.uuid4()), type=RunType.INCREMENTAL, source="openfda:labels+enforcement", started_at=now)
-        label_alerts = recall_alerts = changed = 0
+        label_alerts = recall_alerts = changed = untracked = 0
 
-        raw_labels = [r async for r in self.label_feed.fetch_labels(limit)]
+        raw_labels = [r async for r in self.label_feed.fetch_labels(limit, since)]
         rx_map = await self.resolver.resolve_products({x for r in raw_labels for x in ((r.get("openfda") or {}).get("rxcui") or [])})
         for r in raw_labels:
             try:
@@ -38,6 +48,10 @@ class UpdateLabelsAndRecalls:
                 run.errors.append(str(exc))
                 continue
             old = await self.labels.get(new.set_id)
+            if old is None and self.tracked is not None and not (
+                    new.ingredient_rxcuis and await self.tracked.get_many(list(new.ingredient_rxcuis))):
+                untracked += 1                                  # a drug the app does not follow
+                continue
             if old is not None and (new.version, new.effective_date) != (old.version, old.effective_date):
                 changed += 1
                 new = new.model_copy(update={"history": [*old.history, LabelHistoryEntry(
@@ -50,7 +64,7 @@ class UpdateLabelsAndRecalls:
             await self.labels.upsert_many([new])
             run.records_loaded += 1
 
-        raw_recalls = [r async for r in self.recall_feed.fetch_recalls(limit)]
+        raw_recalls = [r async for r in self.recall_feed.fetch_recalls(limit, since)]
         rx_map = await self.resolver.resolve_products({x for r in raw_recalls for x in ((r.get("openfda") or {}).get("rxcui") or [])})
         known = {r.recall_number for r in await self.recalls.all()}
         fresh = []
@@ -68,7 +82,8 @@ class UpdateLabelsAndRecalls:
                         AlertType.RECALL, ing, rec.recall_number, f"New {rec.classification.value} recall", "recall")
         await self.recalls.upsert_many(fresh)
         run.records_loaded += len(fresh)
-        run.stats = {"labels_changed": changed, "label_alerts": label_alerts, "recall_alerts": recall_alerts}
+        run.stats = {"labels_changed": changed, "label_alerts": label_alerts, "recall_alerts": recall_alerts,
+                     "labels_untracked": untracked, "since": since.isoformat() if since else None}
         run.ended_at = self.clock.now()
         await self.runs.add(run)
         return run

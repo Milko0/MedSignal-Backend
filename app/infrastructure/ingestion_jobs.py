@@ -6,6 +6,7 @@ a job that crashes writes one with the error, so the admin always sees what happ
 """
 import logging
 import uuid
+from datetime import timedelta
 from pathlib import Path
 
 from app.application.container import Container
@@ -30,6 +31,7 @@ log = logging.getLogger("medsignal.ingestion")
 
 FAERS = "faers"
 INCREMENTAL = "incremental"
+LABELS = "labels"
 
 
 class IngestionJobs:
@@ -79,18 +81,31 @@ class IngestionJobs:
         finally:
             self.running.discard(kind)
 
-    async def incremental(self, label_limit: int | None) -> None:
-        """FR-20: daily shortage list (diffed, history kept, alerts) and new labels and recalls."""
+    def _feeds(self) -> OpenFdaFeeds:
+        return OpenFdaFeeds(self.s, HttpFetcher(self.s.openfda_requests_per_second, self.s.http_max_retries,
+                                                self.s.http_timeout_seconds))
+
+    async def _labels_and_recalls(self, label_limit: int | None, since_days: int | None) -> None:
+        c, feeds = self.c, self._feeds()
+        since = c.clock.now().date() - timedelta(days=since_days or self.s.incremental_lookback_days)
+        await UpdateLabelsAndRecalls(feeds, feeds, c.labels, c.recalls, self._resolver(), self._dispatcher(),
+                                     c.ingestion_runs, c.clock, tracked=c.ingredients).execute(label_limit, since)
+
+    async def incremental(self, label_limit: int | None, since_days: int | None = None) -> None:
+        """FR-20: shortage list (diffed, history kept, alerts), then the labels and recalls changed in the last
+        `since_days` days (default INCREMENTAL_LOOKBACK_DAYS)."""
         async def work():
-            c = self.c
-            fda = HttpFetcher(self.s.openfda_requests_per_second, self.s.http_max_retries,
-                              self.s.http_timeout_seconds)
-            feeds, resolver, dispatcher = OpenFdaFeeds(self.s, fda), self._resolver(), self._dispatcher()
-            await PollShortages(feeds, c.shortages, c.products, resolver, c.shortage_status, dispatcher,
-                                c.ingestion_runs, c.clock).execute()
-            await UpdateLabelsAndRecalls(feeds, feeds, c.labels, c.recalls, resolver, dispatcher, c.ingestion_runs,
-                                         c.clock).execute(label_limit)
+            c, feeds = self.c, self._feeds()
+            await PollShortages(feeds, c.shortages, c.products, self._resolver(), c.shortage_status,
+                                self._dispatcher(), c.ingestion_runs, c.clock).execute()
+            await self._labels_and_recalls(label_limit, since_days)
         await self._guard(INCREMENTAL, RunType.INCREMENTAL, "openfda:shortages+labels+enforcement", work)
+
+    async def labels_and_recalls(self, since_days: int | None = None) -> None:
+        """The worker's daily job: labels and recalls changed in the last days (shortages have their own job)."""
+        async def work():
+            await self._labels_and_recalls(None, since_days)
+        await self._guard(LABELS, RunType.INCREMENTAL, "openfda:labels+enforcement", work)
 
     async def faers(self, paths: list[str], window_quarters: int | None) -> None:
         """FR-19: load FAERS bulk files, keep the rolling window, recompute the signals of every quarter."""

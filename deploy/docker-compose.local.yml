@@ -94,6 +94,8 @@ services:
     build: ..
     environment: *app-env
     ports: ["8001:8000"]
+    # FAERS bulk files downloaded on the host (scripts/download_faers.py) for POST /api/admin/ingestion/faers
+    volumes: ["../data/faers:/srv/data/faers:ro"]
     depends_on: *app-depends
     restart: unless-stopped
   worker:
