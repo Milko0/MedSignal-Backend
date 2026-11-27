@@ -146,11 +146,16 @@ class IngestionJobs:
         """FR-19: load FAERS bulk files, keep the rolling window, recompute the signals of every quarter."""
         async def work():
             c = self.c
-            await LoadFaersBulk(FileFeeds(self.s.faers_dir), c.reports, self._resolver(), c.ingestion_runs,
-                                c.clock).execute(paths)
-            await ApplyRetentionWindow(c.reports, c.signals, c.ingestion_runs, c.clock).execute(
+            run = await LoadFaersBulk(FileFeeds(self.s.faers_dir), c.reports, self._resolver(), c.ingestion_runs,
+                                      c.clock).execute(paths, log=False)
+            kept = await ApplyRetentionWindow(c.reports, c.signals, c.ingestion_runs, c.clock).execute(
                 window_quarters or self.s.faers_window_quarters)
             compute = ComputeQuarterSignals(c.reports, c.signals, c.labels, c.excluded_terms, c.clock)
             for quarter in await c.reports.quarters():          # oldest first: "emerging" compares with the past
                 await compute.execute(quarter)
+            # The FULL_LOAD entry is written last, so it marks the end of the whole job (the admin screen waits for it)
+            run.stats = {**run.stats, "quarters_kept": kept.kept, "quarters_dropped": kept.dropped,
+                         "signals_recomputed": True}
+            run.ended_at = c.clock.now()
+            await c.ingestion_runs.add(run)
         await self._guard(FAERS, RunType.FULL_LOAD, "faers:" + ",".join(Path(p).name for p in paths), work)

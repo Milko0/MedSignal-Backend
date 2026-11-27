@@ -186,3 +186,41 @@ async def test_a_crashing_job_is_logged(world):
     await jobs._guard("incremental", RunType.INCREMENTAL, "openfda", boom)
     failed = [r for r in await world.ingestion_runs.list(0, 100) if r.errors]
     assert [r.errors for r in failed] == [["RuntimeError: openFDA is down"]] and "incremental" not in jobs.running
+
+
+async def test_the_faers_log_entry_is_written_when_the_whole_job_is_over(world, clock, tmp_path):
+    """The admin screen waits for the FULL_LOAD entry: it must come after the window and the signal recomputation."""
+    import json
+
+    from app.application.services.ingredient_resolver import IngredientResolver
+    from tests.fixtures import raw
+    from tests.fixtures.fakes import FakeNormalizer
+
+    (tmp_path / "2026q3-drug-event-0001-of-0001.json").write_text(json.dumps({"results": raw.build_reports()}))
+    settings = get_settings().model_copy(update={"faers_dir": str(tmp_path), "faers_window_quarters": 6})
+
+    class OfflineJobs(IngestionJobs):
+        def _resolver(self):
+            return IngredientResolver(FakeNormalizer(), world.rx_concepts, world.ingredients, world.name_map, clock)
+
+    jobs = OfflineJobs(world, settings)
+    known = {r.run_id for r in await world.ingestion_runs.list(0, 1000)}
+
+    async def new_full_loads():
+        return [r for r in await world.ingestion_runs.list(0, 1000)
+                if r.run_id not in known and r.type is RunType.FULL_LOAD]
+
+    seen_during_signals = []
+    original = world.signals.upsert_many
+
+    async def spy(signals):
+        seen_during_signals.append(len(await new_full_loads()))
+        return await original(signals)
+
+    world.signals.upsert_many = spy
+    jobs.start("faers")
+    await jobs.faers(jobs.faers_paths(["2026q3-drug-event-0001-of-0001.json"]), None)
+    assert seen_during_signals and set(seen_during_signals) == {0}   # no FULL_LOAD entry while signals are computed
+    [entry] = await new_full_loads()
+    assert entry.stats["signals_recomputed"] is True and entry.ended_at is not None and not entry.errors
+    assert "faers" not in jobs.running

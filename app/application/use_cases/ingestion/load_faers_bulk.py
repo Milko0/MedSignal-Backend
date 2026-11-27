@@ -66,7 +66,9 @@ class LoadFaersBulk:
             await self.reports.upsert_many(clean)
             run.records_loaded += len(clean)
 
-    async def execute(self, paths: list[str]) -> IngestionRun:
+    async def execute(self, paths: list[str], log: bool = True) -> IngestionRun:
+        """Loads the files. With log=False the run is returned but not stored: the caller stores it once the whole
+        job (window, signals) is over, so its log entry marks the real end of the job."""
         run = IngestionRun(run_id=str(uuid.uuid4()), type=RunType.FULL_LOAD, source="faers:" + ",".join(paths),
                            started_at=self.clock.now())
         chunk: list[dict] = []
@@ -80,5 +82,6 @@ class LoadFaersBulk:
             await self._flush(chunk, run)
         run.stats = {**self.resolver.stats, "match_coverage": round(await self.reports.match_coverage(None), 4)}
         run.ended_at = self.clock.now()
-        await self.runs.add(run)
+        if log:
+            await self.runs.add(run)
         return run

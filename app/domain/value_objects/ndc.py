@@ -7,6 +7,17 @@ _PRODUCT_SHAPES = {(4, 4), (5, 3), (5, 4)}
 _PACKAGE_SHAPES = {(4, 4, 2), (5, 3, 2), (5, 4, 1)}
 
 
+def _unpad(lab: str, prod: str, pack: str) -> tuple[str, str, str]:
+    """An 11-digit NDC written with hyphens (5-4-2, e.g. 76045-0210-10 in the FDA shortage list) is a 10-digit NDC
+    with one padding zero. Removing it gives the form the NDC directory uses (76045-210-10), so the shortage links to
+    its product. Only one of the three parts can carry the padding; when that is ambiguous the 11-digit form is kept
+    (the ndc11 is the same either way)."""
+    candidates = [(lab[1:], prod, pack)] if lab[0] == "0" else []
+    candidates += [(lab, prod[1:], pack)] if prod[0] == "0" else []
+    candidates += [(lab, prod, pack[1:])] if pack[0] == "0" else []
+    return candidates[0] if len(candidates) == 1 else (lab, prod, pack)
+
+
 @dataclass(frozen=True)
 class Ndc:
     labeler: str
@@ -18,6 +29,8 @@ class Ndc:
         s = str(text).strip()
         if re.fullmatch(r"\d+-\d+-\d+", s):
             lab, prod, pack = s.split("-")
+            if (len(lab), len(prod), len(pack)) == (5, 4, 2):
+                return cls(*_unpad(lab, prod, pack))
             if (len(lab), len(prod), len(pack)) not in _PACKAGE_SHAPES:
                 raise ValueError(f"Unexpected NDC package shape: {text!r}")
             return cls(lab, prod, pack)

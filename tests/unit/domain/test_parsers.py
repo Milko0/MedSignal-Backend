@@ -35,6 +35,17 @@ def test_ndc_product_and_errors():
         Ndc.parse("1234-56-7")
 
 
+@pytest.mark.parametrize(("text", "package_ndc"), [
+    ("76045-0210-10", "76045-210-10"),   # FDA shortage list, 11 digits: product padded -> 5-3-2 (real case)
+    ("01234-5678-90", "1234-5678-90"),   # labeler padded -> 4-4-2
+    ("12345-6789-01", "12345-6789-1"),   # package padded -> 5-4-1
+    ("01234-0567-01", "01234-0567-01"),  # ambiguous: kept as written
+])
+def test_hyphenated_11_digit_ndc_is_unpadded(text, package_ndc):
+    n = Ndc.parse(text)
+    assert n.package_ndc == package_ndc and n.to_ndc11() == text.replace("-", "")
+
+
 @pytest.mark.parametrize("value,iso,precision", [
     ("20240101", "2024-01-01", Precision.DAY),
     ("202212", "2022-12-01", Precision.MONTH),
